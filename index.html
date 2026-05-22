@@ -164,6 +164,10 @@
   .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
   .badge.in { background: #dcfce7; color: #15803d; }
   .badge.out { background: #e2e8f0; color: #475569; }
+  .badge.hol { background: #ffe4d3; color: #c2410c; }
+  .grid-table .holiday-row td { background: #fff7ed; }
+  .grid-table .holiday-row td.nm { background: #ffe2c8; color: #9a3412; }
+  .grid-table td.hol-col { color: #c2410c; font-weight: 700; }
 
   /* ===== Worker cards ===== */
   .wk-card {
@@ -389,14 +393,23 @@
 
         <div class="card">
           <h3>勤務設定</h3>
-          <p class="desc">実働時間と残業時間の自動計算に使います。実働 ＝ (退勤 − 出勤) − 休憩、残業 ＝ 実働 − 所定労働時間。</p>
+          <p class="desc">定時の時間帯から残業を判定します。実働 ＝ (退勤 − 出勤) − 休憩、残業 ＝ 定時終了を超えた分（＋早出オプション）。休日扱いの日は残業を計上せず、全時間を休日労働として集計します。</p>
           <div class="set-row">
-            <label>所定労働時間</label>
-            <input type="number" id="set-stdwork" step="0.5" min="0"> 時間
+            <label>定時</label>
+            <input type="time" id="set-workstart" style="width:110px">
+            <span>〜</span>
+            <input type="time" id="set-workend" style="width:110px">
           </div>
           <div class="set-row">
-            <label>標準休憩時間</label>
+            <label>標準休憩</label>
             <input type="number" id="set-break" step="5" min="0"> 分（打刻時の初期値）
+          </div>
+          <div class="set-row">
+            <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-early"> 早出を残業に含める</label>
+            <span style="font-size:11.5px;color:#94a3b8">(出勤が定時開始より早かった分も加算)</span>
+          </div>
+          <div class="set-row">
+            <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-weekend"> 土曜・日曜を自動で休日出勤扱いにする</label>
           </div>
           <div class="set-row">
             <label>会社名</label>
@@ -441,7 +454,7 @@
     </div>
     <div class="field">
       <label>勤務日</label>
-      <input type="date" id="rec-date">
+      <input type="date" id="rec-date" onchange="updateRecCalc()">
     </div>
     <div class="field-2">
       <div class="field">
@@ -456,6 +469,14 @@
     <div class="field">
       <label>休憩（分）</label>
       <input type="number" id="rec-break" step="5" min="0" oninput="updateRecCalc()">
+    </div>
+    <div class="field">
+      <label>休日扱い</label>
+      <select id="rec-holiday" onchange="updateRecCalc()">
+        <option value="">自動（土日のとき休日 ／ 設定で変更可）</option>
+        <option value="yes">休日として扱う</option>
+        <option value="no">平日として扱う</option>
+      </select>
     </div>
     <div class="field">
       <label>備考</label>
@@ -547,19 +568,36 @@ function fmtDateShort(ymd) { const d = parseYMD(ymd); return d ? (d.getMonth() +
 /* ========== 状態の読み書き ========== */
 function normalizeState(d) {
   d = d || {};
-  const def = { standardWorkMin: 480, defaultBreakMin: 60, companyName: '有限会社 大田原工業' };
+  const def = {
+    workStart: '07:30',
+    workEnd: '17:00',
+    defaultBreakMin: 90,
+    includeEarlyAsOvertime: true,
+    weekendAsHoliday: true,
+    companyName: '有限会社 大田原工業'
+  };
   const s = {
     workers: Array.isArray(d.workers) ? d.workers : [],
     records: Array.isArray(d.records) ? d.records : [],
     settings: Object.assign({}, def, d.settings || {})
   };
+  delete s.settings.standardWorkMin; // legacy field
+  if (!/^\d{1,2}:\d{2}$/.test(s.settings.workStart)) s.settings.workStart = '07:30';
+  if (!/^\d{1,2}:\d{2}$/.test(s.settings.workEnd)) s.settings.workEnd = '17:00';
+  if (typeof s.settings.defaultBreakMin !== 'number' || s.settings.defaultBreakMin < 0) s.settings.defaultBreakMin = 90;
+  s.settings.includeEarlyAsOvertime = (s.settings.includeEarlyAsOvertime !== false);
+  s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
   s.workers = s.workers.filter(w => w && w.id).map(w => ({
     id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false
   }));
-  s.records = s.records.filter(r => r && r.id && r.workerId).map(r => ({
-    id: String(r.id), workerId: String(r.workerId), date: String(r.date || ''),
-    in: r.in || '', out: r.out || '', breakMin: Number(r.breakMin) || 0, note: r.note || ''
-  }));
+  s.records = s.records.filter(r => r && r.id && r.workerId).map(r => {
+    const o = {
+      id: String(r.id), workerId: String(r.workerId), date: String(r.date || ''),
+      in: r.in || '', out: r.out || '', breakMin: Number(r.breakMin) || 0, note: r.note || ''
+    };
+    if (r.holiday === 'yes' || r.holiday === 'no') o.holiday = r.holiday;
+    return o;
+  });
   return s;
 }
 function loadState() {
@@ -593,10 +631,31 @@ function recWorkMin(r) {
   s -= (r.breakMin || 0);
   return Math.max(0, s);
 }
+function recIsHoliday(r) {
+  if (r.holiday === 'yes') return true;
+  if (r.holiday === 'no') return false;
+  if (!state.settings.weekendAsHoliday) return false;
+  const d = parseYMD(r.date);
+  if (!d) return false;
+  const wd = d.getDay();
+  return wd === 0 || wd === 6;
+}
 function recOvertimeMin(r) {
-  const w = recWorkMin(r);
-  if (w == null) return null;
-  return Math.max(0, w - (state.settings.standardWorkMin || 480));
+  const wk = recWorkMin(r);
+  if (wk == null) return null;
+  if (recIsHoliday(r)) return 0;
+  const inMin = hmToMin(r.in), outMin = hmToMin(r.out);
+  if (inMin == null || outMin == null) return null;
+  const ws = hmToMin(state.settings.workStart);
+  const we = hmToMin(state.settings.workEnd);
+  if (ws == null || we == null) return 0;
+  const outEff = outMin < inMin ? outMin + 1440 : outMin;
+  const late = Math.max(0, outEff - we);
+  const early = state.settings.includeEarlyAsOvertime ? Math.max(0, ws - inMin) : 0;
+  return Math.min(wk, late + early);
+}
+function recHolidayMin(r) {
+  return recIsHoliday(r) ? (recWorkMin(r) || 0) : 0;
 }
 
 /* ========== 画面切替 ========== */
@@ -853,29 +912,33 @@ function renderToday() {
     t.innerHTML = '<div class="empty">この日の勤怠記録はありません。</div>';
     return;
   }
-  let totWork = 0, totOt = 0;
+  let totWork = 0, totOt = 0, totHolCount = 0;
   const rows = recs.map(function (r) {
     const wk = recWorkMin(r), ov = recOvertimeMin(r);
+    const hol = recIsHoliday(r);
     if (wk != null) totWork += wk;
     if (ov != null) totOt += ov;
-    const stat = r.out ? '<span class="badge out">退勤済</span>' : '<span class="badge in">出勤中</span>';
-    return '<tr onclick="openEditRecord(\'' + r.id + '\')">' +
+    if (hol) totHolCount++;
+    const holBadge = hol ? '<span class="badge hol">休日</span> ' : '';
+    const stat = holBadge + (r.out ? '<span class="badge out">退勤済</span>' : '<span class="badge in">出勤中</span>');
+    return '<tr class="' + (hol ? 'holiday-row' : '') + '" onclick="openEditRecord(\'' + r.id + '\')">' +
       '<td class="nm">' + esc(workerName(r.workerId)) + '</td>' +
       '<td>' + (r.in || '—') + '</td>' +
       '<td>' + (r.out || '—') + '</td>' +
       '<td>' + (r.breakMin || 0) + '分</td>' +
       '<td>' + fmtHM(wk) + '</td>' +
-      '<td class="' + (ov ? 'ot' : '') + '">' + (ov ? fmtHM(ov) : '—') + '</td>' +
+      '<td class="' + (!hol && ov ? 'ot' : '') + '">' + (hol ? '休日' : (ov ? fmtHM(ov) : '—')) + '</td>' +
       '<td>' + stat + '</td></tr>';
   }).join('');
+  const holFootNote = totHolCount ? '・うち休日 ' + totHolCount + '件' : '';
   t.innerHTML =
     '<div class="table-wrap"><table class="grid-table">' +
     '<thead><tr><th>氏名</th><th>出勤</th><th>退勤</th><th>休憩</th><th>実働</th><th>残業</th><th>状態</th></tr></thead>' +
     '<tbody>' + rows + '</tbody>' +
-    '<tfoot><tr><td class="nm">合計（' + recs.length + '件）</td><td colspan="3"></td>' +
+    '<tfoot><tr><td class="nm">合計（' + recs.length + '件' + holFootNote + '）</td><td colspan="3"></td>' +
     '<td>' + fmtHM(totWork) + '</td><td class="' + (totOt ? 'ot' : '') + '">' + fmtHM(totOt) + '</td><td></td></tr></tfoot>' +
     '</table></div>' +
-    '<p class="hint">行をタップすると時刻・休憩を修正できます。</p>';
+    '<p class="hint">行をタップすると時刻・休憩・休日扱いを修正できます。</p>';
 }
 
 /* ========== 月次画面 ========== */
@@ -900,28 +963,33 @@ function renderMonth() {
   const el = document.getElementById('month-table');
   if (!ids.length) { el.innerHTML = '<div class="empty">記録がありません。</div>'; return; }
 
-  let tDays = 0, tWork = 0, tOt = 0;
+  let tDays = 0, tWork = 0, tOt = 0, tHolDays = 0;
   const rows = ids.map(function (id) {
     const rs = byW[id] || [];
     const days = new Set(rs.map(r => r.date)).size;
+    const holDates = new Set();
     let work = 0, ot = 0;
     rs.forEach(function (r) {
       const w = recWorkMin(r); if (w != null) work += w;
       const o = recOvertimeMin(r); if (o != null) ot += o;
+      if (recIsHoliday(r)) holDates.add(r.date);
     });
-    tDays += days; tWork += work; tOt += ot;
+    const holDays = holDates.size;
+    tDays += days; tWork += work; tOt += ot; tHolDays += holDays;
     return '<tr onclick="openWorkerMonth(\'' + id + '\')">' +
       '<td class="nm">' + esc(workerName(id)) + '</td>' +
       '<td>' + days + '日</td>' +
       '<td>' + fmtHM(work) + '</td>' +
-      '<td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td></tr>';
+      '<td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td>' +
+      '<td class="' + (holDays ? 'hol-col' : '') + '">' + (holDays ? holDays + '日' : '—') + '</td></tr>';
   }).join('');
   el.innerHTML =
     '<div class="table-wrap"><table class="grid-table">' +
-    '<thead><tr><th>氏名</th><th>出勤日数</th><th>実働計</th><th>残業計</th></tr></thead>' +
+    '<thead><tr><th>氏名</th><th>出勤日数</th><th>実働計</th><th>残業計</th><th>休日出勤</th></tr></thead>' +
     '<tbody>' + rows + '</tbody>' +
     '<tfoot><tr><td class="nm">合計</td><td>' + tDays + '日</td>' +
-    '<td>' + fmtHM(tWork) + '</td><td class="' + (tOt ? 'ot' : '') + '">' + fmtHM(tOt) + '</td></tr></tfoot>' +
+    '<td>' + fmtHM(tWork) + '</td><td class="' + (tOt ? 'ot' : '') + '">' + fmtHM(tOt) + '</td>' +
+    '<td class="' + (tHolDays ? 'hol-col' : '') + '">' + (tHolDays ? tHolDays + '日' : '—') + '</td></tr></tfoot>' +
     '</table></div>' +
     '<p class="hint">氏名をタップすると日別の明細を確認・修正できます。</p>';
 }
@@ -938,23 +1006,28 @@ function renderWorkerMonth() {
   const body = document.getElementById('wm-body');
   if (!rs.length) { body.innerHTML = '<div class="empty">この月の記録はありません。</div>'; return; }
   let work = 0, ot = 0;
+  const holDates = new Set();
   const rows = rs.map(function (r) {
     const w = recWorkMin(r), o = recOvertimeMin(r);
+    const hol = recIsHoliday(r);
     if (w != null) work += w;
     if (o != null) ot += o;
-    return '<tr onclick="openEditRecord(\'' + r.id + '\')">' +
-      '<td>' + fmtDateShort(r.date) + '</td>' +
+    if (hol) holDates.add(r.date);
+    return '<tr class="' + (hol ? 'holiday-row' : '') + '" onclick="openEditRecord(\'' + r.id + '\')">' +
+      '<td>' + fmtDateShort(r.date) + (hol ? ' <span class="badge hol">休</span>' : '') + '</td>' +
       '<td>' + (r.in || '—') + '</td>' +
       '<td>' + (r.out || '—') + '</td>' +
       '<td>' + (r.breakMin || 0) + '</td>' +
       '<td>' + fmtHM(w) + '</td>' +
-      '<td class="' + (o ? 'ot' : '') + '">' + (o ? fmtHM(o) : '—') + '</td></tr>';
+      '<td class="' + (!hol && o ? 'ot' : '') + '">' + (hol ? '休日' : (o ? fmtHM(o) : '—')) + '</td></tr>';
   }).join('');
+  const totDays = new Set(rs.map(r => r.date)).size;
+  const holNote = holDates.size ? '・休日 ' + holDates.size + '日' : '';
   body.innerHTML =
     '<div class="table-wrap"><table class="grid-table">' +
     '<thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>実働</th><th>残業</th></tr></thead>' +
     '<tbody>' + rows + '</tbody>' +
-    '<tfoot><tr><td colspan="4">合計（出勤' + new Set(rs.map(r => r.date)).size + '日）</td>' +
+    '<tfoot><tr><td colspan="4">合計（出勤' + totDays + '日' + holNote + '）</td>' +
     '<td>' + fmtHM(work) + '</td><td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td></tr></tfoot>' +
     '</table></div>';
 }
@@ -1076,19 +1149,28 @@ function fillRecordModal(r) {
   document.getElementById('rec-in').value = r.in || '';
   document.getElementById('rec-out').value = r.out || '';
   document.getElementById('rec-break').value = (r.breakMin != null ? r.breakMin : state.settings.defaultBreakMin);
+  document.getElementById('rec-holiday').value = r.holiday || '';
   document.getElementById('rec-note').value = r.note || '';
   updateRecCalc();
 }
 function updateRecCalc() {
+  const dateEl = document.getElementById('rec-date');
+  const holEl = document.getElementById('rec-holiday');
   const tmp = {
     in: document.getElementById('rec-in').value,
     out: document.getElementById('rec-out').value,
-    breakMin: parseInt(document.getElementById('rec-break').value, 10) || 0
+    breakMin: parseInt(document.getElementById('rec-break').value, 10) || 0,
+    date: dateEl ? dateEl.value : '',
+    holiday: holEl && holEl.value ? holEl.value : undefined
   };
   const w = recWorkMin(tmp);
-  document.getElementById('rec-calc').textContent =
-    w == null ? '出勤・退勤の両方を入力すると実働を計算します'
-              : '実働 ' + fmtHM(w) + '　／　残業 ' + fmtHM(recOvertimeMin(tmp));
+  const el = document.getElementById('rec-calc');
+  if (w == null) { el.textContent = '出勤・退勤の両方を入力すると実働を計算します'; return; }
+  if (recIsHoliday(tmp)) {
+    el.textContent = '休日出勤　実働 ' + fmtHM(w);
+  } else {
+    el.textContent = '実働 ' + fmtHM(w) + '　／　残業 ' + fmtHM(recOvertimeMin(tmp));
+  }
 }
 function openAddRecord() {
   editingRecordId = null;
@@ -1128,11 +1210,17 @@ function saveRecordModal() {
   }
   const breakMin = Math.max(0, parseInt(document.getElementById('rec-break').value, 10) || 0);
   const note = document.getElementById('rec-note').value.trim();
+  const holV = document.getElementById('rec-holiday').value;
   if (editingRecordId) {
     const r = state.records.find(x => x.id === editingRecordId);
-    if (r) Object.assign(r, { workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
+    if (r) {
+      Object.assign(r, { workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
+      if (holV === 'yes' || holV === 'no') r.holiday = holV; else delete r.holiday;
+    }
   } else {
-    state.records.push({ id: uid('r'), workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
+    const nr = { id: uid('r'), workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note };
+    if (holV === 'yes' || holV === 'no') nr.holiday = holV;
+    state.records.push(nr);
   }
   saveState();
   closeModal('rec-modal');
@@ -1149,18 +1237,25 @@ function deleteRecordModal() {
 
 /* ========== 設定 ========== */
 function renderSettings() {
-  document.getElementById('set-stdwork').value = (state.settings.standardWorkMin || 480) / 60;
+  document.getElementById('set-workstart').value = state.settings.workStart;
+  document.getElementById('set-workend').value = state.settings.workEnd;
   document.getElementById('set-break').value = state.settings.defaultBreakMin;
+  document.getElementById('set-early').checked = state.settings.includeEarlyAsOvertime;
+  document.getElementById('set-weekend').checked = state.settings.weekendAsHoliday;
   document.getElementById('set-company').value = state.settings.companyName || '';
   document.getElementById('dbx-file-path').value = dbxFilePath;
   document.getElementById('dbx-redirect-display').textContent = window.location.origin + window.location.pathname;
   updateDbxUI();
 }
 function saveWorkSettings() {
-  const h = parseFloat(document.getElementById('set-stdwork').value);
+  const ws = document.getElementById('set-workstart').value;
+  const we = document.getElementById('set-workend').value;
   const b = parseInt(document.getElementById('set-break').value, 10);
-  if (!isNaN(h) && h >= 0) state.settings.standardWorkMin = Math.round(h * 60);
+  if (/^\d{1,2}:\d{2}$/.test(ws)) state.settings.workStart = ws;
+  if (/^\d{1,2}:\d{2}$/.test(we)) state.settings.workEnd = we;
   if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
+  state.settings.includeEarlyAsOvertime = document.getElementById('set-early').checked;
+  state.settings.weekendAsHoliday = document.getElementById('set-weekend').checked;
   state.settings.companyName = document.getElementById('set-company').value.trim();
   saveState();
   renderAll();
@@ -1183,10 +1278,11 @@ function exportDetailCSV() {
            (a.in || '').localeCompare(b.in || '');
   });
   if (!recs.length) { alert('この月の記録がありません'); return; }
-  const rows = [['日付', '曜日', '氏名', '出勤', '退勤', '休憩(分)', '実働(時間)', '残業(時間)', '備考']];
+  const rows = [['日付', '曜日', '氏名', '出勤', '退勤', '休憩(分)', '実働(時間)', '残業(時間)', '休日', '備考']];
   recs.forEach(function (r) {
     rows.push([r.date, weekdayJa(r.date), workerName(r.workerId), r.in || '', r.out || '',
-      r.breakMin || 0, decHours(recWorkMin(r)), decHours(recOvertimeMin(r)), r.note || '']);
+      r.breakMin || 0, decHours(recWorkMin(r)), decHours(recOvertimeMin(r)),
+      recIsHoliday(r) ? 'はい' : 'いいえ', r.note || '']);
   });
   writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
 }
@@ -1195,16 +1291,18 @@ function exportSummaryCSV() {
   if (!recs.length) { alert('この月の記録がありません'); return; }
   const byW = {};
   recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
-  const rows = [['氏名', '出勤日数', '実働計(時間)', '残業計(時間)']];
+  const rows = [['氏名', '出勤日数', '実働計(時間)', '残業計(時間)', '休日出勤日数']];
   monthWorkerIds().forEach(function (id) {
     const rs = byW[id] || [];
     const days = new Set(rs.map(r => r.date)).size;
+    const holDates = new Set();
     let w = 0, o = 0;
     rs.forEach(function (r) {
       const a = recWorkMin(r); if (a != null) w += a;
       const b = recOvertimeMin(r); if (b != null) o += b;
+      if (recIsHoliday(r)) holDates.add(r.date);
     });
-    rows.push([workerName(id), days, decHours(w), decHours(o)]);
+    rows.push([workerName(id), days, decHours(w), decHours(o), holDates.size]);
   });
   writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
 }
