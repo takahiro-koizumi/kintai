@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="勤怠">
+<meta name="theme-color" content="#2b3a4a">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/svg+xml" href="./icon.svg">
+<link rel="apple-touch-icon" href="./icon.svg">
+<title>勤怠管理 - 大田原工業</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+    background: #eceef0;
+    color: #1f2937;
+    font-size: 15px;
+  }
+  body { overflow: hidden; -webkit-user-select: none; user-select: none; }
+  input, select, textarea { font-family: inherit; -webkit-user-select: text; user-select: text; }
+  button { font-family: inherit; cursor: pointer; }
+
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+  /* ===== Topbar ===== */
+  .topbar {
+    background: #2b3a4a; color: #fff;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; flex-shrink: 0;
+  }
+  .topbar h1 { font-size: 17px; font-weight: 700; white-space: nowrap; }
+  .topbar .clock { margin-left: auto; text-align: right; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .topbar .clock .cd { font-size: 11px; opacity: .8; }
+  .topbar .clock .ct { font-size: 18px; font-weight: 700; }
+  .dbx-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 9px; border-radius: 6px; font-size: 11px;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+    cursor: pointer; white-space: nowrap;
+  }
+  .dbx-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .dbx-chip.connected { background: #16a34a; border-color: #15803d; }
+  .dbx-chip.syncing { background: #2563eb; border-color: #1d4ed8; }
+  .dbx-chip.error { background: #dc2626; border-color: #b91c1c; }
+
+  /* ===== Tabs ===== */
+  .tabs { display: flex; background: #22303d; flex-shrink: 0; }
+  .tab {
+    flex: 1; padding: 8px 2px 7px; text-align: center;
+    color: rgba(255,255,255,.55); font-size: 12px; font-weight: 600;
+    border: 0; background: transparent; border-bottom: 3px solid transparent;
+  }
+  .tab .ic { display: block; font-size: 19px; margin-bottom: 1px; }
+  .tab.active { color: #fff; background: #2b3a4a; border-bottom-color: #16a34a; }
+
+  /* ===== Views ===== */
+  main { flex: 1; overflow: hidden; position: relative; }
+  .view { display: none; height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .view.active { display: block; }
+  .view-pad { padding: 14px; }
+  .empty { color: #94a3b8; text-align: center; padding: 30px 16px; font-size: 14px; }
+  .hint { color: #94a3b8; font-size: 12px; margin-top: 8px; }
+
+  /* ===== Buttons ===== */
+  .btn, .btn-pri, .btn-sm {
+    border-radius: 8px; border: 1px solid #cbd5e1; background: #fff;
+    color: #1f2937; font-size: 14px; padding: 10px 15px;
+  }
+  .btn-sm { padding: 7px 11px; font-size: 13px; }
+  .btn-pri { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 700; }
+  .btn-pri:active, .btn:active, .btn-sm:active { filter: brightness(.93); }
+  .btn.danger, .btn-sm.danger { color: #dc2626; border-color: #f1b6b6; }
+  .btn-pri.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+
+  /* ===== Punch view ===== */
+  .punch-wrap { display: flex; gap: 14px; padding: 14px; flex-wrap: wrap; }
+  .scan-col { flex: 1 1 340px; min-width: 280px; }
+  .roster-col { flex: 1 1 320px; min-width: 260px; }
+  .scan-box {
+    position: relative; background: #0b0f14; border-radius: 14px;
+    overflow: hidden; aspect-ratio: 4/3; max-height: 56vh;
+  }
+  #scan-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-frame {
+    position: absolute; inset: 16%;
+    border: 3px solid rgba(255,255,255,.85); border-radius: 16px;
+    pointer-events: none;
+  }
+  .scan-msg {
+    position: absolute; left: 0; right: 0; bottom: 56px;
+    text-align: center; color: #fff; font-size: 13px;
+    text-shadow: 0 1px 4px #000; padding: 0 14px; line-height: 1.5;
+  }
+  .scan-controls {
+    position: absolute; left: 0; right: 0; bottom: 12px;
+    display: flex; gap: 8px; justify-content: center;
+  }
+  .btn-scan {
+    padding: 11px 22px; border-radius: 24px; border: 0;
+    background: #16a34a; color: #fff; font-size: 16px; font-weight: 700;
+    box-shadow: 0 3px 10px rgba(0,0,0,.35);
+  }
+  .btn-scan.stop { background: #dc2626; }
+  .btn-flip {
+    width: 46px; border-radius: 23px; border: 0;
+    background: rgba(255,255,255,.92); font-size: 18px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.35);
+  }
+  .roster-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .roster-head #punch-summary { font-size: 13px; color: #475569; font-weight: 600; }
+  .roster-head .ttl { font-weight: 700; font-size: 15px; }
+  .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .roster .empty { grid-column: 1 / -1; }
+  .r-item {
+    background: #fff; border-radius: 10px; padding: 10px 12px;
+    border-left: 5px solid #cbd5e1; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .r-item.in { border-left-color: #16a34a; }
+  .r-item.out { border-left-color: #94a3b8; }
+  .r-item.warn { border-left-color: #ea580c; }
+  .r-item .r-name { font-weight: 700; font-size: 15px; }
+  .r-item .r-stat { font-size: 12px; margin-top: 3px; color: #64748b; }
+  .r-item.in .r-stat { color: #15803d; }
+  .r-item.warn .r-stat { color: #c2410c; font-weight: 700; }
+
+  /* ===== Date nav ===== */
+  .date-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .date-nav button { padding: 8px 12px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; font-size: 14px; }
+  .date-nav .lbl { font-weight: 700; font-size: 16px; min-width: 130px; text-align: center; }
+  .date-nav .spacer { flex: 1; }
+  .row-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+
+  .unmarked {
+    font-size: 12.5px; color: #92400e; background: #fef3c7;
+    border: 1px solid #fcd9a0; border-radius: 8px;
+    padding: 7px 10px; margin-bottom: 10px;
+  }
+  .unmarked:empty { display: none; }
+  .unmarked .um-label { font-weight: 700; margin-right: 4px; }
+
+  /* ===== Tables ===== */
+  .table-wrap { overflow-x: auto; border-radius: 10px; }
+  .grid-table {
+    width: 100%; border-collapse: collapse; background: #fff;
+    font-size: 14px; min-width: 380px;
+  }
+  .grid-table th, .grid-table td {
+    border: 1px solid #e5e7eb; padding: 9px 6px; text-align: center; white-space: nowrap;
+  }
+  .grid-table th { background: #f1f3f5; font-size: 12px; color: #475569; }
+  .grid-table td.nm { text-align: left; font-weight: 700; }
+  .grid-table tbody tr:active { background: #eff6ff; }
+  .grid-table td.ot { color: #ea580c; font-weight: 700; }
+  .grid-table tfoot td { background: #f8fafc; font-weight: 700; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .badge.in { background: #dcfce7; color: #15803d; }
+  .badge.out { background: #e2e8f0; color: #475569; }
+
+  /* ===== Worker cards ===== */
+  .wk-card {
+    background: #fff; border-radius: 10px; padding: 12px 14px;
+    margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .wk-card.inactive { opacity: .6; }
+  .wk-name { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+  .wk-name .tag { font-size: 11px; background: #e2e8f0; color: #475569; padding: 2px 7px; border-radius: 8px; font-weight: 700; }
+  .wk-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* ===== Settings cards ===== */
+  .card {
+    background: #fff; border-radius: 12px; padding: 16px;
+    margin-bottom: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .card h3 { font-size: 14px; margin-bottom: 10px; color: #2b3a4a; }
+  .card p.desc { font-size: 12.5px; color: #64748b; margin-bottom: 10px; line-height: 1.6; }
+  .set-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .set-row label { font-size: 13px; color: #475569; min-width: 110px; }
+  .set-row input[type=number], .set-row input[type=text] {
+    padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+  }
+  .set-row input[type=number] { width: 90px; }
+  .set-row input[type=text] { flex: 1; min-width: 160px; }
+  .dbx-info { font-size: 12px; color: #64748b; margin-top: 8px; }
+  details.adv { margin-top: 10px; }
+  details.adv summary { font-size: 12px; color: #64748b; cursor: pointer; }
+  details.adv .help { font-size: 11px; color: #94a3b8; margin-top: 6px; line-height: 1.6; word-break: break-all; }
+  code { background: rgba(0,0,0,.06); padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+
+  /* ===== Feedback overlay ===== */
+  .feedback {
+    position: fixed; inset: 0; z-index: 500; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(15,23,42,.55); padding: 20px;
+  }
+  .feedback.show { display: flex; }
+  .fb-card {
+    background: #fff; border-radius: 22px; padding: 32px 40px;
+    text-align: center; min-width: 270px; max-width: 90vw;
+    box-shadow: 0 24px 70px rgba(0,0,0,.45); border-top: 12px solid #16a34a;
+  }
+  .feedback.out .fb-card { border-top-color: #ea580c; }
+  .feedback.err .fb-card { border-top-color: #dc2626; }
+  .fb-type { font-size: 19px; font-weight: 800; color: #16a34a; }
+  .feedback.out .fb-type { color: #ea580c; }
+  .feedback.err .fb-type { color: #dc2626; }
+  .fb-name { font-size: 38px; font-weight: 800; margin: 4px 0; line-height: 1.15; }
+  .fb-time { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .fb-sub { font-size: 14px; color: #64748b; margin-top: 8px; }
+
+  /* ===== Modal ===== */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(15,23,42,.5);
+    display: none; align-items: center; justify-content: center;
+    z-index: 300; padding: 16px;
+  }
+  .modal-bg.show { display: flex; }
+  #rec-modal { z-index: 320; }
+  .modal {
+    background: #fff; border-radius: 14px; padding: 18px;
+    width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto;
+  }
+  .modal h2 { font-size: 17px; margin-bottom: 14px; }
+  .field { margin-bottom: 11px; }
+  .field label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+  .field input, .field select, .field textarea {
+    width: 100%; padding: 10px; border: 1px solid #cbd5e1;
+    border-radius: 8px; font-size: 15px; background: #fff;
+  }
+  .field-2 { display: flex; gap: 10px; }
+  .field-2 .field { flex: 1; }
+  .calc-line {
+    background: #f1f5f9; border-radius: 8px; padding: 9px 12px;
+    font-size: 14px; font-weight: 700; color: #334155; text-align: center;
+  }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+  .modal-actions .left { margin-right: auto; }
+
+  /* ===== QR ===== */
+  .qr-big { width: min(70vw, 300px); margin: 0 auto; }
+  .qr-big svg { width: 100%; height: auto; display: block; }
+  .qr-name { text-align: center; font-size: 22px; font-weight: 800; margin-top: 10px; }
+  .qr-hint { text-align: center; font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.6; }
+  .qr-fail { padding: 20px; text-align: center; color: #dc2626; font-size: 13px; }
+
+  /* ===== Print area (QR cards) ===== */
+  #qr-print { display: none; }
+  .qr-sheet { display: flex; flex-wrap: wrap; gap: 6mm; }
+  .qr-card {
+    width: 85mm; height: 54mm; border: 1px dashed #999; border-radius: 4mm;
+    display: flex; align-items: center; gap: 5mm; padding: 5mm; overflow: hidden;
+  }
+  .qr-card .qc-qr { width: 42mm; height: 42mm; flex-shrink: 0; }
+  .qr-card .qc-qr svg { width: 100%; height: 100%; display: block; }
+  .qr-card .qc-label { font-size: 8pt; color: #888; }
+  .qr-card .qc-name { font-size: 19pt; font-weight: 800; margin: 1mm 0; }
+  .qr-card .qc-co { font-size: 9pt; color: #555; }
+
+  @media print {
+    .app, .modal-bg, .feedback { display: none !important; }
+    #qr-print { display: block !important; }
+    @page { margin: 10mm; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>勤怠管理</h1>
+    <div class="clock">
+      <div class="cd" id="clock-date">--</div>
+      <div class="ct" id="clock-time">--:--:--</div>
+    </div>
+    <span class="dbx-chip" id="dbx-chip" onclick="showView('settings')" title="クリックで設定">
+      <span class="dot"></span><span id="dbx-chip-text">未接続</span>
+    </span>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-view="punch" onclick="showView('punch')"><span class="ic">📷</span>打刻</button>
+    <button class="tab" data-view="today" onclick="showView('today')"><span class="ic">📋</span>日別</button>
+    <button class="tab" data-view="month" onclick="showView('month')"><span class="ic">📊</span>月次</button>
+    <button class="tab" data-view="workers" onclick="showView('workers')"><span class="ic">👷</span>作業員</button>
+    <button class="tab" data-view="settings" onclick="showView('settings')"><span class="ic">⚙</span>設定</button>
+  </div>
+
+  <main>
+    <!-- ===== Punch ===== -->
+    <section id="view-punch" class="view active">
+      <div class="punch-wrap">
+        <div class="scan-col">
+          <div class="scan-box">
+            <video id="scan-video" playsinline muted></video>
+            <div class="scan-frame"></div>
+            <div class="scan-msg" id="scan-msg">「スキャン開始」を押してQRコードをかざしてください</div>
+            <div class="scan-controls">
+              <button class="btn-scan" id="scan-start" onclick="startScan()">📷 スキャン開始</button>
+              <button class="btn-scan stop" id="scan-stop" onclick="stopScan()" style="display:none">■ 停止</button>
+              <button class="btn-flip" id="scan-flip" onclick="flipCamera()" style="display:none" title="カメラ切替">🔄</button>
+            </div>
+          </div>
+        </div>
+        <div class="roster-col">
+          <div class="roster-head">
+            <span class="ttl">本日の状況</span>
+            <span id="punch-summary"></span>
+          </div>
+          <p class="hint" style="margin:0 0 8px">QRが使えない時は、下の名前をタップして手動打刻できます。</p>
+          <div class="roster" id="roster"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Today ===== -->
+    <section id="view-today" class="view">
+      <div class="view-pad">
+        <div class="date-nav">
+          <button onclick="shiftDay(-1)">◀</button>
+          <span class="lbl" id="today-label">--</span>
+          <button onclick="shiftDay(1)">▶</button>
+          <button onclick="gotoToday()">今日</button>
+          <span class="spacer"></span>
+          <button class="btn-sm" onclick="openAddRecord()">＋手動で追加</button>
+        </div>
+        <div class="unmarked" id="today-unmarked"></div>
+        <div id="today-table"></div>
+      </div>
+    </section>
+
+    <!-- ===== Month ===== -->
+    <section id="view-month" class="view">
+      <div class="view-pad">
+        <div class="date-nav">
+          <button onclick="shiftMonth(-1)">◀</button>
+          <span class="lbl" id="month-label">--</span>
+          <button onclick="shiftMonth(1)">▶</button>
+          <span class="spacer"></span>
+          <button class="btn-sm" onclick="exportDetailCSV()">明細CSV</button>
+          <button class="btn-sm" onclick="exportSummaryCSV()">集計CSV</button>
+        </div>
+        <div id="month-table"></div>
+      </div>
+    </section>
+
+    <!-- ===== Workers ===== -->
+    <section id="view-workers" class="view">
+      <div class="view-pad">
+        <div class="row-bar">
+          <button class="btn-pri" onclick="addWorker()">＋作業員を追加</button>
+          <button class="btn-sm" onclick="printQrCards()">QRカードを印刷</button>
+        </div>
+        <div id="workers-list"></div>
+      </div>
+    </section>
+
+    <!-- ===== Settings ===== -->
+    <section id="view-settings" class="view">
+      <div class="view-pad">
+        <div class="card">
+          <h3>Dropbox連携（全社員で共有）</h3>
+          <p class="desc">大田原工業 工事部のチーム共有フォルダに自動保存します。社員それぞれが「Dropboxに接続」を一度押すだけで、全員が同じ勤怠データを見られます。</p>
+          <div class="set-row">
+            <button class="btn-pri" id="dbx-connect-btn" onclick="dbxConnect()">Dropboxに接続</button>
+            <button class="btn danger" id="dbx-disconnect-btn" onclick="dbxDisconnect()" style="display:none">切断</button>
+            <button class="btn-sm" id="dbx-sync-btn" onclick="dbxManualSync()" style="display:none">今すぐ同期</button>
+            <button class="btn-sm" id="dbx-pull-btn" onclick="dbxManualPull()" style="display:none">↓最新取得</button>
+          </div>
+          <div class="dbx-info" id="dbx-info"></div>
+          <details class="adv">
+            <summary>詳細設定（通常さわらない）</summary>
+            <div class="set-row" style="margin-top:8px">
+              <label>保存パス</label>
+              <input type="text" id="dbx-file-path" style="flex:1;min-width:160px">
+              <button class="btn-sm" onclick="saveDbxFilePath()">保存</button>
+            </div>
+            <div class="help">
+              既定: <code>/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json</code><br>
+              リダイレクトURI: <code id="dbx-redirect-display"></code>
+            </div>
+          </details>
+        </div>
+
+        <div class="card">
+          <h3>勤務設定</h3>
+          <p class="desc">実働時間と残業時間の自動計算に使います。実働 ＝ (退勤 − 出勤) − 休憩、残業 ＝ 実働 − 所定労働時間。</p>
+          <div class="set-row">
+            <label>所定労働時間</label>
+            <input type="number" id="set-stdwork" step="0.5" min="0"> 時間
+          </div>
+          <div class="set-row">
+            <label>標準休憩時間</label>
+            <input type="number" id="set-break" step="5" min="0"> 分（打刻時の初期値）
+          </div>
+          <div class="set-row">
+            <label>会社名</label>
+            <input type="text" id="set-company" placeholder="QRカードに印刷されます">
+          </div>
+          <div class="set-row">
+            <button class="btn-pri" onclick="saveWorkSettings()">勤務設定を保存</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>データ</h3>
+          <p class="desc">バックアップはこの端末に保存されます。復元すると現在のデータは置き換わります。</p>
+          <div class="row-bar" style="margin:0">
+            <button class="btn-sm" onclick="exportBackup()">バックアップを書き出し</button>
+            <button class="btn-sm" onclick="importBackup()">バックアップから復元</button>
+            <a class="btn-sm" href="./privacy.html" style="text-decoration:none;display:inline-block">プライバシーポリシー</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== Feedback overlay ===== -->
+<div class="feedback" id="feedback" onclick="hideFeedback()">
+  <div class="fb-card">
+    <div class="fb-type" id="fb-type"></div>
+    <div class="fb-name" id="fb-name"></div>
+    <div class="fb-time" id="fb-time"></div>
+    <div class="fb-sub" id="fb-sub"></div>
+  </div>
+</div>
+
+<!-- ===== Record edit modal ===== -->
+<div class="modal-bg" id="rec-modal">
+  <div class="modal">
+    <h2 id="rec-modal-title">勤怠を編集</h2>
+    <div class="field">
+      <label>作業員</label>
+      <select id="rec-worker"></select>
+    </div>
+    <div class="field">
+      <label>勤務日</label>
+      <input type="date" id="rec-date">
+    </div>
+    <div class="field-2">
+      <div class="field">
+        <label>出勤</label>
+        <input type="time" id="rec-in" oninput="updateRecCalc()">
+      </div>
+      <div class="field">
+        <label>退勤</label>
+        <input type="time" id="rec-out" oninput="updateRecCalc()">
+      </div>
+    </div>
+    <div class="field">
+      <label>休憩（分）</label>
+      <input type="number" id="rec-break" step="5" min="0" oninput="updateRecCalc()">
+    </div>
+    <div class="field">
+      <label>備考</label>
+      <input type="text" id="rec-note" placeholder="任意">
+    </div>
+    <div class="calc-line" id="rec-calc"></div>
+    <div class="modal-actions">
+      <button class="btn danger left" id="rec-delete" onclick="deleteRecordModal()">削除</button>
+      <button class="btn" onclick="closeModal('rec-modal')">キャンセル</button>
+      <button class="btn-pri" onclick="saveRecordModal()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Worker month detail modal ===== -->
+<div class="modal-bg" id="wm-modal">
+  <div class="modal">
+    <h2 id="wm-title">明細</h2>
+    <div id="wm-body"></div>
+    <div class="modal-actions">
+      <button class="btn-sm left" onclick="addRecordForWm()">＋勤怠を追加</button>
+      <button class="btn" onclick="closeModal('wm-modal')">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== QR display modal ===== -->
+<div class="modal-bg" id="qr-modal">
+  <div class="modal">
+    <h2 id="qr-modal-title">QRコード</h2>
+    <div id="qr-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('qr-modal')">閉じる</button>
+      <button class="btn-pri" onclick="printOneCard()">このカードを印刷</button>
+    </div>
+  </div>
+</div>
+
+<div id="qr-print"></div>
+<canvas id="scan-canvas" style="display:none"></canvas>
+
+<script>
+"use strict";
+
+/* ========== 定数 ========== */
+const STORAGE_KEY = 'kintai_state';
+const QR_PREFIX = 'KNT1:';
+const DBX_APP_KEY = 'w0akss3w157oa53';
+const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json';
+const WD = ['日','月','火','水','木','金','土'];
+
+/* ========== 状態 ========== */
+let state = null;
+let currentView = 'punch';
+let viewDate = todayYMD();
+let viewMonth = { y: new Date().getFullYear(), m: new Date().getMonth() + 1 };
+let editingRecordId = null;
+let wmWorkerId = null;
+let qrModalWorkerId = null;
+let lastPunch = {};      // workerId -> {ts,type,hm}
+let feedbackTimer = null;
+
+/* ========== 汎用ユーティリティ ========== */
+function pad(n) { return ('0' + n).slice(-2); }
+function todayYMD(d) { d = d || new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function nowHM(d) { d = d || new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function uid(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+function hmToMin(hm) {
+  if (!hm) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm);
+  if (!m) return null;
+  return (+m[1]) * 60 + (+m[2]);
+}
+function fmtHM(min) {
+  if (min == null) return '—';
+  return Math.floor(min / 60) + ':' + pad(min % 60);
+}
+function decHours(min) { return min == null ? '' : (min / 60).toFixed(2); }
+function parseYMD(s) {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+function weekdayJa(ymd) { const d = parseYMD(ymd); return d ? WD[d.getDay()] : ''; }
+function fmtDateLabel(ymd) { const d = parseYMD(ymd); return d ? (d.getMonth() + 1) + '月' + d.getDate() + '日(' + WD[d.getDay()] + ')' : ymd; }
+function fmtDateShort(ymd) { const d = parseYMD(ymd); return d ? (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')' : ymd; }
+
+/* ========== 状態の読み書き ========== */
+function normalizeState(d) {
+  d = d || {};
+  const def = { standardWorkMin: 480, defaultBreakMin: 60, companyName: '有限会社 大田原工業' };
+  const s = {
+    workers: Array.isArray(d.workers) ? d.workers : [],
+    records: Array.isArray(d.records) ? d.records : [],
+    settings: Object.assign({}, def, d.settings || {})
+  };
+  s.workers = s.workers.filter(w => w && w.id).map(w => ({
+    id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false
+  }));
+  s.records = s.records.filter(r => r && r.id && r.workerId).map(r => ({
+    id: String(r.id), workerId: String(r.workerId), date: String(r.date || ''),
+    in: r.in || '', out: r.out || '', breakMin: Number(r.breakMin) || 0, note: r.note || ''
+  }));
+  return s;
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    state = normalizeState(raw ? JSON.parse(raw) : {});
+  } catch (e) { state = normalizeState({}); }
+}
+function saveLocal() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function saveState() {
+  saveLocal();
+  scheduleDbxAutoSave();
+}
+
+/* ========== 作業員・記録ヘルパ ========== */
+function getWorker(id) { return state.workers.find(w => w.id === id); }
+function workerName(id) { const w = getWorker(id); return w ? w.name : '(削除済み)'; }
+function recordsOn(date) { return state.records.filter(r => r.date === date); }
+function openRecord(workerId) { return state.records.find(r => r.workerId === workerId && !r.out); }
+function recordsInMonth(y, m) {
+  const p = y + '-' + pad(m);
+  return state.records.filter(r => r.date && r.date.indexOf(p) === 0);
+}
+function recWorkMin(r) {
+  const i = hmToMin(r.in), o = hmToMin(r.out);
+  if (i == null || o == null) return null;
+  let s = o - i;
+  if (s < 0) s += 1440;
+  s -= (r.breakMin || 0);
+  return Math.max(0, s);
+}
+function recOvertimeMin(r) {
+  const w = recWorkMin(r);
+  if (w == null) return null;
+  return Math.max(0, w - (state.settings.standardWorkMin || 480));
+}
+
+/* ========== 画面切替 ========== */
+function showView(name) {
+  currentView = name;
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === name));
+  if (name === 'punch') {
+    renderRoster();
+    if (scanWasOn) startScan();
+  } else {
+    stopScan(true);
+  }
+  if (name === 'today') renderToday();
+  if (name === 'month') renderMonth();
+  if (name === 'workers') renderWorkers();
+  if (name === 'settings') renderSettings();
+}
+function renderAll() {
+  renderRoster();
+  renderToday();
+  renderMonth();
+  renderWorkers();
+  if (document.getElementById('wm-modal').classList.contains('show')) renderWorkerMonth();
+}
+
+/* ========== 時計 ========== */
+function tickClock() {
+  const d = new Date();
+  document.getElementById('clock-date').textContent = (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')';
+  document.getElementById('clock-time').textContent = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+/* ========== 打刻 ========== */
+function punch(workerId) {
+  const w = getWorker(workerId);
+  if (!w) { showFeedback('err', 'エラー', '未登録のQRコードです', '', ''); beep('err'); return; }
+  if (!w.active) { showFeedback('err', '無効', w.name, '', 'この作業員は無効化されています'); beep('err'); return; }
+
+  const lp = lastPunch[workerId];
+  if (lp && Date.now() - lp.ts < 60000) {
+    showFeedback(lp.type, '打刻済み', w.name, lp.hm, (lp.type === 'in' ? '出勤' : '退勤') + 'を記録済みです');
+    return;
+  }
+
+  const open = openRecord(workerId);
+  const hm = nowHM();
+  let type, sub;
+  if (open) {
+    open.out = hm;
+    type = 'out';
+    const wk = recWorkMin(open);
+    sub = (wk != null ? '実働 ' + fmtHM(wk) + '　' : '') + 'お疲れさまでした';
+  } else {
+    state.records.push({ id: uid('r'), workerId: workerId, date: todayYMD(), in: hm, out: '', breakMin: state.settings.defaultBreakMin, note: '' });
+    type = 'in';
+    sub = 'おはようございます';
+  }
+  lastPunch[workerId] = { ts: Date.now(), type: type, hm: hm };
+  saveState();
+  showFeedback(type, type === 'in' ? '出勤' : '退勤', w.name, hm, sub);
+  beep(type);
+  if (navigator.vibrate) { try { navigator.vibrate(type === 'in' ? 90 : [70, 50, 70]); } catch (e) {} }
+  renderAll();
+}
+function manualPunch(id) {
+  const w = getWorker(id);
+  if (!w) return;
+  const action = openRecord(id) ? '退勤' : '出勤';
+  if (!confirm(w.name + ' さんの' + action + 'を記録しますか？')) return;
+  punch(id);
+}
+function showFeedback(kind, typeLabel, name, time, sub) {
+  const fb = document.getElementById('feedback');
+  fb.className = 'feedback show ' + (kind === 'out' ? 'out' : kind === 'err' ? 'err' : 'in');
+  document.getElementById('fb-type').textContent = typeLabel;
+  document.getElementById('fb-name').textContent = name;
+  document.getElementById('fb-time').textContent = time || '';
+  document.getElementById('fb-sub').textContent = sub || '';
+  clearTimeout(feedbackTimer);
+  feedbackTimer = setTimeout(hideFeedback, 3600);
+}
+function hideFeedback() {
+  document.getElementById('feedback').classList.remove('show');
+}
+
+/* ========== 効果音 ========== */
+let audioCtx = null;
+function ensureAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) {}
+}
+function beep(type) {
+  if (!audioCtx) return;
+  try {
+    const seq = type === 'in' ? [[660, 0, .12], [990, .11, .17]]
+              : type === 'out' ? [[523, 0, .12], [392, .11, .19]]
+              : [[196, 0, .32]];
+    seq.forEach(function (p) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = p[0];
+      o.connect(g); g.connect(audioCtx.destination);
+      const t = audioCtx.currentTime + p[1];
+      g.gain.setValueAtTime(.0001, t);
+      g.gain.exponentialRampToValueAtTime(.35, t + .02);
+      g.gain.exponentialRampToValueAtTime(.0001, t + p[2]);
+      o.start(t); o.stop(t + p[2] + .03);
+    });
+  } catch (e) {}
+}
+
+/* ========== QRスキャン ========== */
+let scanStream = null, scanTimer = null, scanFacing = 'environment', scanWasOn = false;
+let lastScanRaw = '', lastScanRawTs = 0;
+
+function setScanMsg(t) { document.getElementById('scan-msg').textContent = t; }
+
+async function startScan() {
+  if (scanStream) return;
+  if (typeof jsQR === 'undefined') {
+    setScanMsg('QR読み取り機能を読み込めませんでした。通信環境を確認するか、右の名前をタップして手動打刻してください。');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setScanMsg('このブラウザ／接続ではカメラを使えません。https（GitHub PagesのURL）で開くか、手動打刻をご利用ください。');
+    return;
+  }
+  try {
+    ensureAudio();
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: scanFacing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    const v = document.getElementById('scan-video');
+    v.srcObject = scanStream;
+    v.setAttribute('playsinline', '');
+    await v.play();
+    scanWasOn = true;
+    document.getElementById('scan-start').style.display = 'none';
+    document.getElementById('scan-stop').style.display = '';
+    document.getElementById('scan-flip').style.display = '';
+    setScanMsg('QRコードを白い枠の中にかざしてください');
+    scanLoop();
+  } catch (e) {
+    console.warn('camera error', e);
+    scanStream = null;
+    let m = 'カメラを起動できませんでした。';
+    if (e && e.name === 'NotAllowedError') m = 'カメラの使用が許可されていません。ブラウザの設定で許可してください。';
+    else if (e && e.name === 'NotFoundError') m = 'カメラが見つかりませんでした。';
+    setScanMsg(m + ' 右の名前をタップして手動打刻もできます。');
+  }
+}
+function stopScan(auto) {
+  if (!auto) scanWasOn = false;
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  const v = document.getElementById('scan-video');
+  if (v) v.srcObject = null;
+  document.getElementById('scan-start').style.display = '';
+  document.getElementById('scan-stop').style.display = 'none';
+  document.getElementById('scan-flip').style.display = 'none';
+  if (!auto) setScanMsg('「スキャン開始」を押してQRコードをかざしてください');
+}
+function flipCamera() {
+  scanFacing = scanFacing === 'environment' ? 'user' : 'environment';
+  const wanted = scanWasOn;
+  stopScan(true);
+  if (wanted) startScan();
+}
+function scanLoop() {
+  scanTimer = setTimeout(scanLoop, 120);
+  const v = document.getElementById('scan-video');
+  if (!v || v.readyState < 2 || !v.videoWidth) return;
+  const cv = document.getElementById('scan-canvas');
+  const scale = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
+  cv.width = Math.round(v.videoWidth * scale);
+  cv.height = Math.round(v.videoHeight * scale);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(v, 0, 0, cv.width, cv.height);
+  let img;
+  try { img = ctx.getImageData(0, 0, cv.width, cv.height); } catch (e) { return; }
+  const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+  if (code && code.data) onScan(code.data);
+}
+function onScan(raw) {
+  const now = Date.now();
+  if (raw === lastScanRaw && now - lastScanRawTs < 3000) { lastScanRawTs = now; return; }
+  lastScanRaw = raw; lastScanRawTs = now;
+  if (raw.indexOf(QR_PREFIX) !== 0) {
+    showFeedback('err', '読み取りエラー', 'これは勤怠用のQRコードではありません', '', '');
+    beep('err');
+    return;
+  }
+  punch(raw.slice(QR_PREFIX.length).trim());
+}
+
+/* ========== 打刻画面のロスター ========== */
+function renderRoster() {
+  const el = document.getElementById('roster');
+  const ws = state.workers.filter(w => w.active);
+  if (!ws.length) {
+    el.innerHTML = '<div class="empty">作業員が登録されていません。「作業員」タブから追加してください。</div>';
+    document.getElementById('punch-summary').textContent = '';
+    return;
+  }
+  const today = todayYMD();
+  let inN = 0, outN = 0, noN = 0;
+  el.innerHTML = ws.map(function (w) {
+    const open = openRecord(w.id);
+    const todays = recordsOn(today).filter(r => r.workerId === w.id);
+    let cls, stat;
+    if (open) {
+      if (open.date !== today) { cls = 'warn'; stat = '要確認: ' + fmtDateShort(open.date) + ' から出勤中'; }
+      else { cls = 'in'; stat = '出勤中　' + open.in + ' 〜'; }
+      inN++;
+    } else if (todays.length) {
+      const last = todays[todays.length - 1];
+      cls = 'out'; stat = '退勤済　' + last.in + ' 〜 ' + last.out;
+      outN++;
+    } else {
+      cls = 'out'; stat = '未打刻'; noN++;
+    }
+    return '<div class="r-item ' + cls + '" onclick="manualPunch(\'' + w.id + '\')">' +
+           '<div class="r-name">' + esc(w.name) + '</div>' +
+           '<div class="r-stat">' + stat + '</div></div>';
+  }).join('');
+  document.getElementById('punch-summary').textContent =
+    '出勤中 ' + inN + '名 ／ 退勤済 ' + outN + '名 ／ 未打刻 ' + noN + '名';
+}
+
+/* ========== 日別画面 ========== */
+function shiftDay(n) {
+  const d = parseYMD(viewDate) || new Date();
+  d.setDate(d.getDate() + n);
+  viewDate = todayYMD(d);
+  renderToday();
+}
+function gotoToday() { viewDate = todayYMD(); renderToday(); }
+function renderToday() {
+  document.getElementById('today-label').textContent = fmtDateLabel(viewDate);
+  const recs = recordsOn(viewDate).slice().sort(function (a, b) {
+    return (a.in || '').localeCompare(b.in || '') ||
+           workerName(a.workerId).localeCompare(workerName(b.workerId), 'ja');
+  });
+  const marked = new Set(recs.map(r => r.workerId));
+  const un = state.workers.filter(w => w.active && !marked.has(w.id)).map(w => w.name);
+  document.getElementById('today-unmarked').innerHTML =
+    un.length ? '<span class="um-label">未打刻</span>' + un.map(esc).join('、') : '';
+
+  const t = document.getElementById('today-table');
+  if (!recs.length) {
+    t.innerHTML = '<div class="empty">この日の勤怠記録はありません。</div>';
+    return;
+  }
+  let totWork = 0, totOt = 0;
+  const rows = recs.map(function (r) {
+    const wk = recWorkMin(r), ov = recOvertimeMin(r);
+    if (wk != null) totWork += wk;
+    if (ov != null) totOt += ov;
+    const stat = r.out ? '<span class="badge out">退勤済</span>' : '<span class="badge in">出勤中</span>';
+    return '<tr onclick="openEditRecord(\'' + r.id + '\')">' +
+      '<td class="nm">' + esc(workerName(r.workerId)) + '</td>' +
+      '<td>' + (r.in || '—') + '</td>' +
+      '<td>' + (r.out || '—') + '</td>' +
+      '<td>' + (r.breakMin || 0) + '分</td>' +
+      '<td>' + fmtHM(wk) + '</td>' +
+      '<td class="' + (ov ? 'ot' : '') + '">' + (ov ? fmtHM(ov) : '—') + '</td>' +
+      '<td>' + stat + '</td></tr>';
+  }).join('');
+  t.innerHTML =
+    '<div class="table-wrap"><table class="grid-table">' +
+    '<thead><tr><th>氏名</th><th>出勤</th><th>退勤</th><th>休憩</th><th>実働</th><th>残業</th><th>状態</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td class="nm">合計（' + recs.length + '件）</td><td colspan="3"></td>' +
+    '<td>' + fmtHM(totWork) + '</td><td class="' + (totOt ? 'ot' : '') + '">' + fmtHM(totOt) + '</td><td></td></tr></tfoot>' +
+    '</table></div>' +
+    '<p class="hint">行をタップすると時刻・休憩を修正できます。</p>';
+}
+
+/* ========== 月次画面 ========== */
+function shiftMonth(n) {
+  let y = viewMonth.y, m = viewMonth.m + n;
+  while (m < 1) { m += 12; y--; }
+  while (m > 12) { m -= 12; y++; }
+  viewMonth = { y: y, m: m };
+  renderMonth();
+}
+function monthWorkerIds() {
+  const ids = new Set(state.workers.filter(w => w.active).map(w => w.id));
+  recordsInMonth(viewMonth.y, viewMonth.m).forEach(r => ids.add(r.workerId));
+  return [...ids];
+}
+function renderMonth() {
+  document.getElementById('month-label').textContent = viewMonth.y + '年' + viewMonth.m + '月';
+  const recs = recordsInMonth(viewMonth.y, viewMonth.m);
+  const byW = {};
+  recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
+  const ids = monthWorkerIds();
+  const el = document.getElementById('month-table');
+  if (!ids.length) { el.innerHTML = '<div class="empty">記録がありません。</div>'; return; }
+
+  let tDays = 0, tWork = 0, tOt = 0;
+  const rows = ids.map(function (id) {
+    const rs = byW[id] || [];
+    const days = new Set(rs.map(r => r.date)).size;
+    let work = 0, ot = 0;
+    rs.forEach(function (r) {
+      const w = recWorkMin(r); if (w != null) work += w;
+      const o = recOvertimeMin(r); if (o != null) ot += o;
+    });
+    tDays += days; tWork += work; tOt += ot;
+    return '<tr onclick="openWorkerMonth(\'' + id + '\')">' +
+      '<td class="nm">' + esc(workerName(id)) + '</td>' +
+      '<td>' + days + '日</td>' +
+      '<td>' + fmtHM(work) + '</td>' +
+      '<td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td></tr>';
+  }).join('');
+  el.innerHTML =
+    '<div class="table-wrap"><table class="grid-table">' +
+    '<thead><tr><th>氏名</th><th>出勤日数</th><th>実働計</th><th>残業計</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td class="nm">合計</td><td>' + tDays + '日</td>' +
+    '<td>' + fmtHM(tWork) + '</td><td class="' + (tOt ? 'ot' : '') + '">' + fmtHM(tOt) + '</td></tr></tfoot>' +
+    '</table></div>' +
+    '<p class="hint">氏名をタップすると日別の明細を確認・修正できます。</p>';
+}
+function openWorkerMonth(id) {
+  wmWorkerId = id;
+  renderWorkerMonth();
+  showModal('wm-modal');
+}
+function renderWorkerMonth() {
+  const id = wmWorkerId;
+  document.getElementById('wm-title').textContent = workerName(id) + '　' + viewMonth.y + '年' + viewMonth.m + '月';
+  const rs = recordsInMonth(viewMonth.y, viewMonth.m).filter(r => r.workerId === id)
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.in || '').localeCompare(b.in || ''));
+  const body = document.getElementById('wm-body');
+  if (!rs.length) { body.innerHTML = '<div class="empty">この月の記録はありません。</div>'; return; }
+  let work = 0, ot = 0;
+  const rows = rs.map(function (r) {
+    const w = recWorkMin(r), o = recOvertimeMin(r);
+    if (w != null) work += w;
+    if (o != null) ot += o;
+    return '<tr onclick="openEditRecord(\'' + r.id + '\')">' +
+      '<td>' + fmtDateShort(r.date) + '</td>' +
+      '<td>' + (r.in || '—') + '</td>' +
+      '<td>' + (r.out || '—') + '</td>' +
+      '<td>' + (r.breakMin || 0) + '</td>' +
+      '<td>' + fmtHM(w) + '</td>' +
+      '<td class="' + (o ? 'ot' : '') + '">' + (o ? fmtHM(o) : '—') + '</td></tr>';
+  }).join('');
+  body.innerHTML =
+    '<div class="table-wrap"><table class="grid-table">' +
+    '<thead><tr><th>日付</th><th>出勤</th><th>退勤</th><th>休憩</th><th>実働</th><th>残業</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+    '<tfoot><tr><td colspan="4">合計（出勤' + new Set(rs.map(r => r.date)).size + '日）</td>' +
+    '<td>' + fmtHM(work) + '</td><td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td></tr></tfoot>' +
+    '</table></div>';
+}
+
+/* ========== 作業員管理 ========== */
+function renderWorkers() {
+  const el = document.getElementById('workers-list');
+  if (!state.workers.length) {
+    el.innerHTML = '<div class="empty">作業員が登録されていません。「＋作業員を追加」から登録してください。</div>';
+    return;
+  }
+  el.innerHTML = state.workers.map(function (w) {
+    return '<div class="wk-card ' + (w.active ? '' : 'inactive') + '">' +
+      '<div class="wk-name">' + esc(w.name) + (w.active ? '' : ' <span class="tag">無効</span>') + '</div>' +
+      '<div class="wk-acts">' +
+        '<button class="btn-sm" onclick="showWorkerQr(\'' + w.id + '\')">QR表示</button>' +
+        '<button class="btn-sm" onclick="renameWorker(\'' + w.id + '\')">名前変更</button>' +
+        '<button class="btn-sm" onclick="toggleWorkerActive(\'' + w.id + '\')">' + (w.active ? '無効化' : '有効化') + '</button>' +
+        '<button class="btn-sm danger" onclick="deleteWorker(\'' + w.id + '\')">削除</button>' +
+      '</div></div>';
+  }).join('');
+}
+function addWorker() {
+  const name = (prompt('作業員の氏名を入力してください') || '').trim();
+  if (!name) return;
+  state.workers.push({ id: uid('w'), name: name, active: true });
+  saveState();
+  renderAll();
+}
+function renameWorker(id) {
+  const w = getWorker(id);
+  if (!w) return;
+  const name = (prompt('氏名を変更', w.name) || '').trim();
+  if (!name) return;
+  w.name = name;
+  saveState();
+  renderAll();
+}
+function toggleWorkerActive(id) {
+  const w = getWorker(id);
+  if (!w) return;
+  w.active = !w.active;
+  saveState();
+  renderAll();
+}
+function deleteWorker(id) {
+  const w = getWorker(id);
+  if (!w) return;
+  const hasRecords = state.records.some(r => r.workerId === id);
+  if (hasRecords) {
+    if (!confirm(w.name + ' さんには勤怠記録があります。削除すると集計に支障が出るため「無効化」しますか？')) return;
+    w.active = false;
+  } else {
+    if (!confirm(w.name + ' さんを削除しますか？')) return;
+    state.workers = state.workers.filter(x => x.id !== id);
+  }
+  saveState();
+  renderAll();
+}
+
+/* ========== QRコード生成・印刷 ========== */
+function buildQrSvg(text) {
+  if (typeof qrcode === 'undefined') return '<div class="qr-fail">QR生成機能を読み込めませんでした</div>';
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(text);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+  } catch (e) {
+    return '<div class="qr-fail">QRコードを生成できませんでした</div>';
+  }
+}
+function showWorkerQr(id) {
+  const w = getWorker(id);
+  if (!w) return;
+  qrModalWorkerId = id;
+  document.getElementById('qr-modal-title').textContent = w.name + ' さんのQRコード';
+  document.getElementById('qr-modal-body').innerHTML =
+    '<div class="qr-big">' + buildQrSvg(QR_PREFIX + w.id) + '</div>' +
+    '<div class="qr-name">' + esc(w.name) + '</div>' +
+    '<div class="qr-hint">この画面を「打刻」のカメラにかざすか、印刷してカードを配布できます。</div>';
+  showModal('qr-modal');
+}
+function qrCardHtml(w) {
+  return '<div class="qr-card">' +
+    '<div class="qc-qr">' + buildQrSvg(QR_PREFIX + w.id) + '</div>' +
+    '<div class="qc-info">' +
+      '<div class="qc-label">勤怠打刻カード</div>' +
+      '<div class="qc-name">' + esc(w.name) + '</div>' +
+      '<div class="qc-co">' + esc(state.settings.companyName || '') + '</div>' +
+    '</div></div>';
+}
+function printOneCard() {
+  const w = getWorker(qrModalWorkerId);
+  if (!w) return;
+  document.getElementById('qr-print').innerHTML = '<div class="qr-sheet">' + qrCardHtml(w) + '</div>';
+  window.print();
+}
+function printQrCards() {
+  const ws = state.workers.filter(w => w.active);
+  if (!ws.length) { alert('有効な作業員がいません。先に作業員を追加してください。'); return; }
+  document.getElementById('qr-print').innerHTML = '<div class="qr-sheet">' + ws.map(qrCardHtml).join('') + '</div>';
+  window.print();
+}
+window.addEventListener('afterprint', function () {
+  document.getElementById('qr-print').innerHTML = '';
+});
+
+/* ========== 勤怠記録の追加・編集モーダル ========== */
+function showModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function fillRecordModal(r) {
+  const sel = document.getElementById('rec-worker');
+  sel.innerHTML = '<option value="">— 選択 —</option>' + state.workers.map(function (w) {
+    return '<option value="' + w.id + '"' + (w.id === r.workerId ? ' selected' : '') + '>' +
+      esc(w.name) + (w.active ? '' : '（無効）') + '</option>';
+  }).join('');
+  document.getElementById('rec-date').value = r.date || todayYMD();
+  document.getElementById('rec-in').value = r.in || '';
+  document.getElementById('rec-out').value = r.out || '';
+  document.getElementById('rec-break').value = (r.breakMin != null ? r.breakMin : state.settings.defaultBreakMin);
+  document.getElementById('rec-note').value = r.note || '';
+  updateRecCalc();
+}
+function updateRecCalc() {
+  const tmp = {
+    in: document.getElementById('rec-in').value,
+    out: document.getElementById('rec-out').value,
+    breakMin: parseInt(document.getElementById('rec-break').value, 10) || 0
+  };
+  const w = recWorkMin(tmp);
+  document.getElementById('rec-calc').textContent =
+    w == null ? '出勤・退勤の両方を入力すると実働を計算します'
+              : '実働 ' + fmtHM(w) + '　／　残業 ' + fmtHM(recOvertimeMin(tmp));
+}
+function openAddRecord() {
+  editingRecordId = null;
+  fillRecordModal({ workerId: '', date: viewDate, in: '', out: '', breakMin: state.settings.defaultBreakMin, note: '' });
+  document.getElementById('rec-modal-title').textContent = '勤怠を手動で追加';
+  document.getElementById('rec-delete').style.display = 'none';
+  showModal('rec-modal');
+}
+function addRecordForWm() {
+  const now = new Date();
+  const sameMonth = (viewMonth.y === now.getFullYear() && viewMonth.m === now.getMonth() + 1);
+  const d = sameMonth ? todayYMD() : viewMonth.y + '-' + pad(viewMonth.m) + '-01';
+  editingRecordId = null;
+  fillRecordModal({ workerId: wmWorkerId, date: d, in: '', out: '', breakMin: state.settings.defaultBreakMin, note: '' });
+  document.getElementById('rec-modal-title').textContent = '勤怠を追加';
+  document.getElementById('rec-delete').style.display = 'none';
+  showModal('rec-modal');
+}
+function openEditRecord(id) {
+  const r = state.records.find(x => x.id === id);
+  if (!r) return;
+  editingRecordId = id;
+  fillRecordModal(r);
+  document.getElementById('rec-modal-title').textContent = '勤怠を編集';
+  document.getElementById('rec-delete').style.display = '';
+  showModal('rec-modal');
+}
+function saveRecordModal() {
+  const workerId = document.getElementById('rec-worker').value;
+  if (!workerId) { alert('作業員を選択してください'); return; }
+  const date = document.getElementById('rec-date').value;
+  if (!date) { alert('勤務日を入力してください'); return; }
+  const inV = document.getElementById('rec-in').value;
+  const outV = document.getElementById('rec-out').value;
+  if (inV && outV && hmToMin(inV) === hmToMin(outV)) {
+    if (!confirm('出勤と退勤が同じ時刻です。このまま保存しますか？')) return;
+  }
+  const breakMin = Math.max(0, parseInt(document.getElementById('rec-break').value, 10) || 0);
+  const note = document.getElementById('rec-note').value.trim();
+  if (editingRecordId) {
+    const r = state.records.find(x => x.id === editingRecordId);
+    if (r) Object.assign(r, { workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
+  } else {
+    state.records.push({ id: uid('r'), workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
+  }
+  saveState();
+  closeModal('rec-modal');
+  renderAll();
+}
+function deleteRecordModal() {
+  if (!editingRecordId) return;
+  if (!confirm('この勤怠記録を削除しますか？')) return;
+  state.records = state.records.filter(x => x.id !== editingRecordId);
+  saveState();
+  closeModal('rec-modal');
+  renderAll();
+}
+
+/* ========== 設定 ========== */
+function renderSettings() {
+  document.getElementById('set-stdwork').value = (state.settings.standardWorkMin || 480) / 60;
+  document.getElementById('set-break').value = state.settings.defaultBreakMin;
+  document.getElementById('set-company').value = state.settings.companyName || '';
+  document.getElementById('dbx-file-path').value = dbxFilePath;
+  document.getElementById('dbx-redirect-display').textContent = window.location.origin + window.location.pathname;
+  updateDbxUI();
+}
+function saveWorkSettings() {
+  const h = parseFloat(document.getElementById('set-stdwork').value);
+  const b = parseInt(document.getElementById('set-break').value, 10);
+  if (!isNaN(h) && h >= 0) state.settings.standardWorkMin = Math.round(h * 60);
+  if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
+  state.settings.companyName = document.getElementById('set-company').value.trim();
+  saveState();
+  renderAll();
+  alert('勤務設定を保存しました');
+}
+
+/* ========== CSV出力 ========== */
+function csvCell(v) {
+  v = String(v == null ? '' : v);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function writeCsv(rows, name) {
+  const csv = rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+  download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), name);
+}
+function exportDetailCSV() {
+  const recs = recordsInMonth(viewMonth.y, viewMonth.m).slice().sort(function (a, b) {
+    return a.date.localeCompare(b.date) ||
+           workerName(a.workerId).localeCompare(workerName(b.workerId), 'ja') ||
+           (a.in || '').localeCompare(b.in || '');
+  });
+  if (!recs.length) { alert('この月の記録がありません'); return; }
+  const rows = [['日付', '曜日', '氏名', '出勤', '退勤', '休憩(分)', '実働(時間)', '残業(時間)', '備考']];
+  recs.forEach(function (r) {
+    rows.push([r.date, weekdayJa(r.date), workerName(r.workerId), r.in || '', r.out || '',
+      r.breakMin || 0, decHours(recWorkMin(r)), decHours(recOvertimeMin(r)), r.note || '']);
+  });
+  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
+}
+function exportSummaryCSV() {
+  const recs = recordsInMonth(viewMonth.y, viewMonth.m);
+  if (!recs.length) { alert('この月の記録がありません'); return; }
+  const byW = {};
+  recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
+  const rows = [['氏名', '出勤日数', '実働計(時間)', '残業計(時間)']];
+  monthWorkerIds().forEach(function (id) {
+    const rs = byW[id] || [];
+    const days = new Set(rs.map(r => r.date)).size;
+    let w = 0, o = 0;
+    rs.forEach(function (r) {
+      const a = recWorkMin(r); if (a != null) w += a;
+      const b = recOvertimeMin(r); if (b != null) o += b;
+    });
+    rows.push([workerName(id), days, decHours(w), decHours(o)]);
+  });
+  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
+}
+
+/* ========== バックアップ ========== */
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function exportBackup() {
+  download(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }),
+    '勤怠バックアップ_' + todayYMD() + '.json');
+}
+function importBackup() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json,application/json';
+  inp.onchange = function () {
+    const f = inp.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = function () {
+      try {
+        const data = JSON.parse(rd.result);
+        if (!data || !Array.isArray(data.workers)) throw new Error('勤怠データの形式ではありません');
+        if (!confirm('現在のデータを、読み込んだバックアップで置き換えます。よろしいですか？')) return;
+        state = normalizeState(data);
+        saveState();
+        renderAll();
+        alert('バックアップから復元しました');
+      } catch (e) {
+        alert('読み込みに失敗しました: ' + e.message);
+      }
+    };
+    rd.readAsText(f);
+  };
+  inp.click();
+}
+
+/* ========== Dropbox連携 ========== */
+/* 大田原工業 工事部 全社員で共有するための固定値。配置ボード等と同一のApp Keyを使い、
+   同一github.ioドメインのlocalStorageでトークンを共有する（接続は一度でOK）。 */
+let dbxFilePath = DBX_DEFAULT_FILE_PATH;
+let dbxToken = null;
+let dbxPathRoot = null;
+let dbxAutoSaveTimer = null;
+let dbxLastSync = null;
+let _lastDbxRev = null;
+let _dbxPending = false;
+
+function setDbxStatus(stateName, text) {
+  const chip = document.getElementById('dbx-chip');
+  chip.classList.remove('connected', 'syncing', 'error');
+  if (stateName) chip.classList.add(stateName);
+  document.getElementById('dbx-chip-text').textContent = text;
+}
+function updateDbxUI() {
+  const connectBtn = document.getElementById('dbx-connect-btn');
+  const disBtn = document.getElementById('dbx-disconnect-btn');
+  const syncBtn = document.getElementById('dbx-sync-btn');
+  const pullBtn = document.getElementById('dbx-pull-btn');
+  const info = document.getElementById('dbx-info');
+  if (dbxToken) {
+    if (connectBtn) connectBtn.style.display = 'none';
+    [disBtn, syncBtn, pullBtn].forEach(b => { if (b) b.style.display = ''; });
+    if (info) info.textContent = dbxLastSync ? ('最終同期: ' + dbxLastSync) : '接続済み（未同期）';
+    const chip = document.getElementById('dbx-chip');
+    if (!chip.classList.contains('syncing') && !chip.classList.contains('error')) {
+      setDbxStatus('connected', dbxLastSync ? ('同期 ' + dbxLastSync) : '接続中');
+    }
+  } else {
+    if (connectBtn) connectBtn.style.display = '';
+    [disBtn, syncBtn, pullBtn].forEach(b => { if (b) b.style.display = 'none'; });
+    if (info) info.textContent = '';
+    setDbxStatus('', '未接続');
+  }
+}
+function saveDbxFilePath() {
+  let path = document.getElementById('dbx-file-path').value.trim();
+  if (!path) path = DBX_DEFAULT_FILE_PATH;
+  if (!path.startsWith('/')) path = '/' + path;
+  if (!path.toLowerCase().endsWith('.json')) {
+    if (!confirm('「' + path + '」は .json で終わっていません。保存しますか？')) return;
+  }
+  dbxFilePath = path;
+  localStorage.setItem('kintai_dbx_file_path', path);
+  document.getElementById('dbx-file-path').value = path;
+  alert('保存パスを更新しました: ' + path);
+}
+
+/* --- PKCE --- */
+function dbxRandom(n) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  return Array.from(a).map(b => ('0' + b.toString(16)).slice(-2)).join('');
+}
+async function dbxSha256B64Url(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  let str = '';
+  new Uint8Array(buf).forEach(b => { str += String.fromCharCode(b); });
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function dbxConnect() {
+  const verifier = dbxRandom(64);
+  const challenge = await dbxSha256B64Url(verifier);
+  localStorage.setItem('dbx_verifier', verifier);
+  const redirect = window.location.origin + window.location.pathname;
+  window.location.href = 'https://www.dropbox.com/oauth2/authorize?' + new URLSearchParams({
+    client_id: DBX_APP_KEY,
+    response_type: 'code',
+    redirect_uri: redirect,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    token_access_type: 'offline'
+  }).toString();
+}
+async function dbxHandleCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (!code) return;
+  const verifier = localStorage.getItem('dbx_verifier');
+  if (!verifier) { history.replaceState({}, '', window.location.pathname); return; }
+  const redirect = window.location.origin + window.location.pathname;
+  try {
+    const resp = await fetch('https://api.dropboxapi.com/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: code,
+        grant_type: 'authorization_code',
+        client_id: DBX_APP_KEY,
+        code_verifier: verifier,
+        redirect_uri: redirect
+      }).toString()
+    });
+    const data = await resp.json();
+    if (data.access_token) {
+      localStorage.setItem('dbx_token', data.access_token);
+      if (data.refresh_token) localStorage.setItem('dbx_refresh', data.refresh_token);
+      dbxToken = data.access_token;
+    } else {
+      console.error('Token exchange failed', data);
+    }
+  } catch (e) { console.error(e); }
+  localStorage.removeItem('dbx_verifier');
+  history.replaceState({}, '', window.location.pathname);
+}
+async function dbxRefreshToken() {
+  const refresh = localStorage.getItem('dbx_refresh');
+  if (!refresh) return false;
+  const resp = await fetch('https://api.dropboxapi.com/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refresh,
+      client_id: DBX_APP_KEY
+    }).toString()
+  });
+  const data = await resp.json();
+  if (data.access_token) {
+    localStorage.setItem('dbx_token', data.access_token);
+    dbxToken = data.access_token;
+    return true;
+  }
+  return false;
+}
+/* チーム共有フォルダはチームスペース名前空間に存在するため path root を指定する */
+async function dbxEnsurePathRoot() {
+  if (dbxPathRoot || !dbxToken) return;
+  try {
+    const doFetch = () => fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + dbxToken }
+    });
+    let resp = await doFetch();
+    if (resp.status === 401) {
+      if (await dbxRefreshToken()) resp = await doFetch();
+    }
+    if (!resp.ok) return;
+    const acct = await resp.json();
+    const rootNs = acct && acct.root_info && acct.root_info.root_namespace_id;
+    if (rootNs) dbxPathRoot = String(rootNs);
+  } catch (e) { console.warn('[Dropbox] account error', e); }
+}
+function dbxDisconnect() {
+  if (!confirm('Dropboxとの接続を切りますか？\n（この端末の他の社内アプリ＝配置ボード等の接続も切れます。ローカルのデータは残ります）')) return;
+  localStorage.removeItem('dbx_token');
+  localStorage.removeItem('dbx_refresh');
+  dbxToken = null;
+  dbxPathRoot = null;
+  dbxLastSync = null;
+  updateDbxUI();
+}
+function asciiEscapeJSON(obj) {
+  return JSON.stringify(obj).replace(/[-￿]/g, c =>
+    '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4));
+}
+async function dbxApiCall(url, args, body) {
+  if (!dbxToken) return null;
+  const headers = {
+    'Authorization': 'Bearer ' + dbxToken,
+    'Dropbox-API-Arg': asciiEscapeJSON(args)
+  };
+  if (dbxPathRoot) headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'root', 'root': dbxPathRoot });
+  if (body) headers['Content-Type'] = 'application/octet-stream';
+  const doFetch = () => fetch(url, { method: 'POST', headers: headers, body: body || undefined });
+  let resp = await doFetch();
+  if (resp.status === 401) {
+    if (await dbxRefreshToken()) { headers['Authorization'] = 'Bearer ' + dbxToken; resp = await doFetch(); }
+  }
+  return resp;
+}
+async function dbxSave(silent) {
+  if (!dbxToken) return false;
+  try {
+    if (!silent) setDbxStatus('syncing', '保存中');
+    const resp = await dbxApiCall(
+      'https://content.dropboxapi.com/2/files/upload',
+      { path: dbxFilePath, mode: 'overwrite', mute: true, autorename: false },
+      JSON.stringify(state)
+    );
+    if (resp && resp.ok) {
+      const result = await resp.json().catch(() => null);
+      if (result && result.rev) _lastDbxRev = result.rev;
+      dbxLastSync = new Date().toLocaleTimeString('ja-JP');
+      setDbxStatus('connected', '同期 ' + dbxLastSync);
+      const info = document.getElementById('dbx-info');
+      if (info) info.textContent = '最終同期: ' + dbxLastSync;
+      _dbxPending = false;
+      return true;
+    }
+    const errText = resp ? await resp.text().catch(() => '') : 'no response';
+    console.error('[Dropbox] save failed', resp && resp.status, errText);
+    setDbxStatus('error', '保存失敗(' + (resp ? resp.status : '?') + ')');
+    return false;
+  } catch (e) {
+    console.error('[Dropbox] save error', e);
+    setDbxStatus('error', 'エラー');
+    return false;
+  }
+}
+/* 成功=データ, ファイル無し=null, エラー=undefined */
+async function dbxLoad(silent) {
+  if (!dbxToken) return undefined;
+  try {
+    if (!silent) setDbxStatus('syncing', '取得中');
+    const resp = await dbxApiCall(
+      'https://content.dropboxapi.com/2/files/download',
+      { path: dbxFilePath },
+      null
+    );
+    if (resp && resp.ok) {
+      const json = await resp.json();
+      const apiResult = resp.headers.get('Dropbox-API-Result');
+      if (apiResult) { try { const m = JSON.parse(apiResult); if (m.rev) _lastDbxRev = m.rev; } catch (e) {} }
+      dbxLastSync = new Date().toLocaleTimeString('ja-JP');
+      setDbxStatus('connected', '同期 ' + dbxLastSync);
+      return json;
+    }
+    if (resp && resp.status === 409) {
+      if (!silent) setDbxStatus('connected', '初回');
+      return null;
+    }
+    console.error('[Dropbox] load failed', resp && resp.status);
+    setDbxStatus('error', '取得失敗(' + (resp ? resp.status : '?') + ')');
+    return undefined;
+  } catch (e) {
+    console.error('[Dropbox] load error', e);
+    setDbxStatus('error', 'エラー');
+    return undefined;
+  }
+}
+async function dbxManualSync() {
+  if (await dbxSave(false)) alert('Dropboxに同期しました');
+}
+async function dbxCheckRemoteRev() {
+  if (!dbxToken) return null;
+  try {
+    const headers = { 'Authorization': 'Bearer ' + dbxToken, 'Content-Type': 'application/json' };
+    if (dbxPathRoot) headers['Dropbox-API-Path-Root'] = JSON.stringify({ '.tag': 'root', 'root': dbxPathRoot });
+    const doFetch = () => fetch('https://api.dropboxapi.com/2/files/get_metadata', {
+      method: 'POST', headers: headers, body: JSON.stringify({ path: dbxFilePath })
+    });
+    let resp = await doFetch();
+    if (resp.status === 401) {
+      if (await dbxRefreshToken()) { headers['Authorization'] = 'Bearer ' + dbxToken; resp = await doFetch(); }
+    }
+    if (!resp.ok) return null;
+    const meta = await resp.json();
+    return meta.rev || null;
+  } catch (e) { return null; }
+}
+async function dbxAutoPullIfChanged() {
+  if (!dbxToken || _dbxPending) return;
+  if (document.visibilityState !== 'visible') return;
+  const remoteRev = await dbxCheckRemoteRev();
+  if (remoteRev && _lastDbxRev && remoteRev === _lastDbxRev) return;
+  const remote = await dbxLoad(true);
+  if (!remote) return;
+  if (JSON.stringify(remote) === JSON.stringify(state)) return;
+  state = normalizeState(remote);
+  saveLocal();
+  renderAll();
+  if (currentView === 'settings') renderSettings();
+}
+async function dbxManualPull() {
+  const remote = await dbxLoad(false);
+  if (remote) {
+    if (!confirm('Dropboxから最新を取得して、この端末のデータを置き換えますか？')) return;
+    state = normalizeState(remote);
+    saveLocal();
+    renderAll();
+    alert('最新の勤怠データを取得しました');
+  } else if (remote === null) {
+    alert('Dropboxにまだデータがありません');
+  } else {
+    alert('取得に失敗しました。通信環境を確認してください');
+  }
+}
+function scheduleDbxAutoSave() {
+  if (!dbxToken) return;
+  _dbxPending = true;
+  if (dbxAutoSaveTimer) clearTimeout(dbxAutoSaveTimer);
+  dbxAutoSaveTimer = setTimeout(function () { dbxSave(true); dbxAutoSaveTimer = null; }, 1200);
+}
+
+window.addEventListener('beforeunload', function (e) {
+  if (_dbxPending) { e.preventDefault(); e.returnValue = 'まだクラウドに保存していない変更があります。'; return e.returnValue; }
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden') {
+    if (dbxToken && _dbxPending) {
+      if (dbxAutoSaveTimer) { clearTimeout(dbxAutoSaveTimer); dbxAutoSaveTimer = null; }
+      dbxSave(true);
+    }
+    stopScan(true);
+  } else {
+    dbxAutoPullIfChanged();
+    if (currentView === 'punch' && scanWasOn) startScan();
+  }
+});
+setInterval(dbxAutoPullIfChanged, 5000);
+
+/* ========== モーダル背景クリックで閉じる ========== */
+document.querySelectorAll('.modal-bg').forEach(function (m) {
+  m.addEventListener('click', function (e) { if (e.target === m) m.classList.remove('show'); });
+});
+
+/* ========== 初期化 ========== */
+loadState();
+renderAll();
+tickClock();
+setInterval(tickClock, 1000);
+
+(async function init() {
+  const prevKey = localStorage.getItem('dbx_app_key');
+  if (prevKey && prevKey !== DBX_APP_KEY) {
+    localStorage.removeItem('dbx_token');
+    localStorage.removeItem('dbx_refresh');
+  }
+  localStorage.setItem('dbx_app_key', DBX_APP_KEY);
+
+  const savedPath = localStorage.getItem('kintai_dbx_file_path');
+  dbxFilePath = savedPath || DBX_DEFAULT_FILE_PATH;
+  if (!savedPath) localStorage.setItem('kintai_dbx_file_path', DBX_DEFAULT_FILE_PATH);
+
+  dbxToken = localStorage.getItem('dbx_token');
+  await dbxHandleCallback();
+  updateDbxUI();
+
+  if (dbxToken) {
+    await dbxEnsurePathRoot();
+    const remote = await dbxLoad(true);
+    if (remote) {
+      state = normalizeState(remote);
+      saveLocal();
+      renderAll();
+    } else if (remote === null) {
+      await dbxSave(false);
+    }
+    updateDbxUI();
+  }
+})();
+</script>
+</body>
+</html>

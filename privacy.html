@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プライバシーポリシー - 勤怠管理</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.7; }
+  h1 { border-bottom: 2px solid #2b3a4a; padding-bottom: 8px; }
+  h2 { margin-top: 28px; color: #2b3a4a; }
+  p, ul { margin: 8px 0; }
+  ul { padding-left: 22px; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 24px; }
+  a { color: #2563eb; }
+  code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>プライバシーポリシー</h1>
+<p class="meta">勤怠管理 (Kintai)<br>最終更新: 2026年5月22日</p>
+
+<h2>1. はじめに</h2>
+<p>「勤怠管理」（以下「本アプリ」）は、有限会社 大田原工業が社内利用を目的に公開しているWebアプリです。本アプリの利用にあたって取り扱う情報について、以下の通り定めます。</p>
+
+<h2>2. 取得・保存する情報</h2>
+<p>本アプリはユーザーが入力した以下の情報を、ブラウザのlocalStorageおよびユーザー自身のDropboxアカウント内に保存します:</p>
+<ul>
+  <li>作業員の氏名</li>
+  <li>出勤・退勤の時刻、休憩時間、残業時間などの勤怠記録</li>
+  <li>所定労働時間・標準休憩時間などの勤務設定、会社名</li>
+</ul>
+<p>これらの情報はユーザーがブラウザに入力したものであり、本アプリの提供者が能動的に収集することはありません。</p>
+
+<h2>3. Dropbox連携について</h2>
+<p>本アプリはユーザーが任意で許可した場合に、Dropbox API を利用して、本アプリが管理する単一のJSONファイル（既定: <code>kintai.json</code>）の読み書きのみを行います。それ以外のファイルやフォルダを参照・変更することはありません。</p>
+<ul>
+  <li>files.content.write: kintai.json の保存</li>
+  <li>files.content.read: kintai.json の読み込み</li>
+  <li>files.metadata.read: kintai.json の更新確認</li>
+</ul>
+
+<h2>4. 第三者への提供</h2>
+<p>本アプリはユーザーの情報を第三者に提供しません。データはユーザーのブラウザおよびユーザー自身のDropboxアカウント内にのみ保存され、本アプリの提供者を含む第三者がアクセスすることはできません。</p>
+
+<h2>5. 解析・トラッキング</h2>
+<p>本アプリは Google Analytics 等のアクセス解析ツールを使用していません。Cookie や類似技術によるトラッキングも行いません。</p>
+
+<h2>6. データの削除</h2>
+<p>ユーザーは以下の方法でデータを削除できます:</p>
+<ul>
+  <li>ブラウザ側: ブラウザのlocalStorageを削除</li>
+  <li>Dropbox側: Dropbox上の kintai.json を削除し、Dropbox設定画面からアプリの認証を解除</li>
+</ul>
+
+<h2>7. 変更</h2>
+<p>本ポリシーは予告なく改訂される場合があります。変更時は本ページに掲示します。</p>
+
+<h2>8. お問い合わせ</h2>
+<p>本ポリシーまたは本アプリに関するお問い合わせは、リポジトリの <a href="https://github.com/takahiro-koizumi/kintai/issues">Issues</a> までご連絡ください。</p>
+
+<p><a href="./">← アプリに戻る</a></p>
+</body>
+</html>

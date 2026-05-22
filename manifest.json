@@ -1,0 +1,19 @@
+{
+  "name": "勤怠管理",
+  "short_name": "勤怠",
+  "description": "勤怠管理 - 有限会社 大田原工業",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eceef0",
+  "theme_color": "#2b3a4a",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
