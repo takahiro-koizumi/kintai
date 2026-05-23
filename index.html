@@ -393,12 +393,22 @@
 
         <div class="card">
           <h3>勤務設定</h3>
-          <p class="desc">定時の時間帯から残業を判定します。実働 ＝ (退勤 − 出勤) − 休憩、残業 ＝ 定時終了を超えた分（＋早出オプション）。休日扱いの日は残業を計上せず、全時間を休日労働として集計します。</p>
+          <p class="desc">定時と残業発生時刻を別々に設定できます。実働 ＝ (退勤 − 出勤) − 休憩、残業 ＝ 残業発生時刻を超えた分（＋早出オプション）を支払単位で切り捨て。休日扱いの日は残業を計上せず、全時間を休日労働として集計します。</p>
           <div class="set-row">
             <label>定時</label>
             <input type="time" id="set-workstart" style="width:110px">
             <span>〜</span>
             <input type="time" id="set-workend" style="width:110px">
+          </div>
+          <div class="set-row">
+            <label>残業発生</label>
+            <input type="time" id="set-otstart" style="width:110px"> から
+            <span style="font-size:11.5px;color:#94a3b8">(定時終了より遅く設定すると猶予時間になる)</span>
+          </div>
+          <div class="set-row">
+            <label>残業の支払単位</label>
+            <input type="number" id="set-otround" step="5" min="0" style="width:80px"> 分
+            <span style="font-size:11.5px;color:#94a3b8">(端数は切り捨て、0で無効)</span>
           </div>
           <div class="set-row">
             <label>標準休憩</label>
@@ -609,6 +619,8 @@ function normalizeState(d) {
   const def = {
     workStart: '07:30',
     workEnd: '17:00',
+    overtimeStart: '17:30',
+    overtimeRoundMin: 30,
     defaultBreakMin: 90,
     includeEarlyAsOvertime: true,
     weekendAsHoliday: true,
@@ -623,6 +635,8 @@ function normalizeState(d) {
   delete s.settings.standardWorkMin; // legacy field
   if (!/^\d{1,2}:\d{2}$/.test(s.settings.workStart)) s.settings.workStart = '07:30';
   if (!/^\d{1,2}:\d{2}$/.test(s.settings.workEnd)) s.settings.workEnd = '17:00';
+  if (!/^\d{1,2}:\d{2}$/.test(s.settings.overtimeStart)) s.settings.overtimeStart = s.settings.workEnd;
+  if (typeof s.settings.overtimeRoundMin !== 'number' || s.settings.overtimeRoundMin < 0) s.settings.overtimeRoundMin = 30;
   if (typeof s.settings.defaultBreakMin !== 'number' || s.settings.defaultBreakMin < 0) s.settings.defaultBreakMin = 90;
   s.settings.includeEarlyAsOvertime = (s.settings.includeEarlyAsOvertime !== false);
   s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
@@ -691,12 +705,15 @@ function recOvertimeMin(r) {
   const inMin = hmToMin(r.in), outMin = hmToMin(r.out);
   if (inMin == null || outMin == null) return null;
   const ws = hmToMin(state.settings.workStart);
-  const we = hmToMin(state.settings.workEnd);
-  if (ws == null || we == null) return 0;
+  const ots = hmToMin(state.settings.overtimeStart);
+  if (ws == null || ots == null) return 0;
   const outEff = outMin < inMin ? outMin + 1440 : outMin;
-  const late = Math.max(0, outEff - we);
+  const late = Math.max(0, outEff - ots);
   const early = state.settings.includeEarlyAsOvertime ? Math.max(0, ws - inMin) : 0;
-  return Math.min(wk, late + early);
+  let total = late + early;
+  const unit = Math.max(0, state.settings.overtimeRoundMin || 0);
+  if (unit > 0) total = Math.floor(total / unit) * unit;
+  return Math.min(wk, total);
 }
 function recHolidayMin(r) {
   return recIsHoliday(r) ? (recWorkMin(r) || 0) : 0;
@@ -1283,6 +1300,8 @@ function deleteRecordModal() {
 function renderSettings() {
   document.getElementById('set-workstart').value = state.settings.workStart;
   document.getElementById('set-workend').value = state.settings.workEnd;
+  document.getElementById('set-otstart').value = state.settings.overtimeStart;
+  document.getElementById('set-otround').value = state.settings.overtimeRoundMin;
   document.getElementById('set-break').value = state.settings.defaultBreakMin;
   document.getElementById('set-early').checked = state.settings.includeEarlyAsOvertime;
   document.getElementById('set-calendar').checked = state.settings.useCompanyCalendar;
@@ -1295,9 +1314,13 @@ function renderSettings() {
 function saveWorkSettings() {
   const ws = document.getElementById('set-workstart').value;
   const we = document.getElementById('set-workend').value;
+  const ots = document.getElementById('set-otstart').value;
+  const otr = parseInt(document.getElementById('set-otround').value, 10);
   const b = parseInt(document.getElementById('set-break').value, 10);
   if (/^\d{1,2}:\d{2}$/.test(ws)) state.settings.workStart = ws;
   if (/^\d{1,2}:\d{2}$/.test(we)) state.settings.workEnd = we;
+  if (/^\d{1,2}:\d{2}$/.test(ots)) state.settings.overtimeStart = ots;
+  if (!isNaN(otr) && otr >= 0) state.settings.overtimeRoundMin = otr;
   if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
   state.settings.includeEarlyAsOvertime = document.getElementById('set-early').checked;
   state.settings.useCompanyCalendar = document.getElementById('set-calendar').checked;
