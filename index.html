@@ -385,7 +385,7 @@
               <button class="btn-sm" onclick="saveDbxFilePath()">保存</button>
             </div>
             <div class="help">
-              既定: <code>/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json</code><br>
+              既定: <code>/大田原工業　工事部/事務/勤怠管理/kintai.json</code><br>
               リダイレクトURI: <code id="dbx-redirect-display"></code>
             </div>
           </details>
@@ -539,7 +539,7 @@
 const STORAGE_KEY = 'kintai_state';
 const QR_PREFIX = 'KNT1:';
 const DBX_APP_KEY = 'w0akss3w157oa53';
-const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json';
+const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/事務/勤怠管理/kintai.json';
 const WD = ['日','月','火','水','木','金','土'];
 
 // 会社カレンダー（配置ボードと同じ、休日予定表2025.11〜2026.10より）
@@ -1740,8 +1740,13 @@ setInterval(tickClock, 1000);
   localStorage.setItem('dbx_app_key', DBX_APP_KEY);
 
   const savedPath = localStorage.getItem('kintai_dbx_file_path');
-  dbxFilePath = savedPath || DBX_DEFAULT_FILE_PATH;
-  if (!savedPath) localStorage.setItem('kintai_dbx_file_path', DBX_DEFAULT_FILE_PATH);
+  const LEGACY_DBX_PATHS = ['/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json'];
+  if (!savedPath || LEGACY_DBX_PATHS.indexOf(savedPath) >= 0) {
+    dbxFilePath = DBX_DEFAULT_FILE_PATH;
+    localStorage.setItem('kintai_dbx_file_path', DBX_DEFAULT_FILE_PATH);
+  } else {
+    dbxFilePath = savedPath;
+  }
 
   dbxToken = localStorage.getItem('dbx_token');
   await dbxHandleCallback();
