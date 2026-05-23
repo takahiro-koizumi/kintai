@@ -409,6 +409,10 @@
             <span style="font-size:11.5px;color:#94a3b8">(出勤が定時開始より早かった分も加算)</span>
           </div>
           <div class="set-row">
+            <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-calendar"> 国民の祝日・会社指定休を自動で休日扱い</label>
+            <span style="font-size:11.5px;color:#94a3b8">(配置ボードと同じ会社カレンダーを内蔵)</span>
+          </div>
+          <div class="set-row">
             <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-weekend"> 土曜・日曜を自動で休日出勤扱いにする</label>
           </div>
           <div class="set-row">
@@ -528,6 +532,40 @@ const DBX_APP_KEY = 'w0akss3w157oa53';
 const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json';
 const WD = ['日','月','火','水','木','金','土'];
 
+// 会社カレンダー（配置ボードと同じ、休日予定表2025.11〜2026.10より）
+// 国民の祝日
+const NATIONAL_HOLIDAYS = new Set([
+  '2025-11-03', '2025-11-24',
+  '2026-01-01', '2026-01-12',
+  '2026-02-11', '2026-02-23',
+  '2026-03-20',
+  '2026-04-29',
+  '2026-05-04', '2026-05-05', '2026-05-06',
+  '2026-07-20',
+  '2026-08-11',
+  '2026-09-21', '2026-09-22', '2026-09-23',
+  '2026-10-12',
+]);
+// 会社指定休
+const COMPANY_HOLIDAYS_BLUE = new Set([
+  '2025-11-08', '2025-11-22',
+  '2025-12-13', '2025-12-27', '2025-12-29', '2025-12-30', '2025-12-31',
+  '2026-01-02', '2026-01-03', '2026-01-24',
+  '2026-02-14', '2026-02-21', '2026-02-28',
+  '2026-03-14', '2026-03-21', '2026-03-28',
+  '2026-04-11', '2026-04-25',
+  '2026-05-02', '2026-05-23',
+  '2026-06-06', '2026-06-13', '2026-06-27',
+  '2026-07-11', '2026-07-25',
+  '2026-08-08', '2026-08-10', '2026-08-12', '2026-08-13', '2026-08-14', '2026-08-15', '2026-08-29',
+  '2026-09-19', '2026-09-26',
+  '2026-10-10', '2026-10-24',
+]);
+// 健康診断・安全大会 (勤怠では休日扱いしないが参考データ・配置ボードと整合)
+const COMPANY_HOLIDAYS_GREEN = new Set([
+  '2026-04-22',
+]);
+
 /* ========== 状態 ========== */
 let state = null;
 let currentView = 'punch';
@@ -574,6 +612,7 @@ function normalizeState(d) {
     defaultBreakMin: 90,
     includeEarlyAsOvertime: true,
     weekendAsHoliday: true,
+    useCompanyCalendar: true,
     companyName: '有限会社 大田原工業'
   };
   const s = {
@@ -587,6 +626,7 @@ function normalizeState(d) {
   if (typeof s.settings.defaultBreakMin !== 'number' || s.settings.defaultBreakMin < 0) s.settings.defaultBreakMin = 90;
   s.settings.includeEarlyAsOvertime = (s.settings.includeEarlyAsOvertime !== false);
   s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
+  s.settings.useCompanyCalendar = (s.settings.useCompanyCalendar !== false);
   s.workers = s.workers.filter(w => w && w.id).map(w => ({
     id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false
   }));
@@ -634,6 +674,10 @@ function recWorkMin(r) {
 function recIsHoliday(r) {
   if (r.holiday === 'yes') return true;
   if (r.holiday === 'no') return false;
+  if (state.settings.useCompanyCalendar && r.date) {
+    if (NATIONAL_HOLIDAYS.has(r.date)) return true;
+    if (COMPANY_HOLIDAYS_BLUE.has(r.date)) return true;
+  }
   if (!state.settings.weekendAsHoliday) return false;
   const d = parseYMD(r.date);
   if (!d) return false;
@@ -1241,6 +1285,7 @@ function renderSettings() {
   document.getElementById('set-workend').value = state.settings.workEnd;
   document.getElementById('set-break').value = state.settings.defaultBreakMin;
   document.getElementById('set-early').checked = state.settings.includeEarlyAsOvertime;
+  document.getElementById('set-calendar').checked = state.settings.useCompanyCalendar;
   document.getElementById('set-weekend').checked = state.settings.weekendAsHoliday;
   document.getElementById('set-company').value = state.settings.companyName || '';
   document.getElementById('dbx-file-path').value = dbxFilePath;
@@ -1255,6 +1300,7 @@ function saveWorkSettings() {
   if (/^\d{1,2}:\d{2}$/.test(we)) state.settings.workEnd = we;
   if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
   state.settings.includeEarlyAsOvertime = document.getElementById('set-early').checked;
+  state.settings.useCompanyCalendar = document.getElementById('set-calendar').checked;
   state.settings.weekendAsHoliday = document.getElementById('set-weekend').checked;
   state.settings.companyName = document.getElementById('set-company').value.trim();
   saveState();
