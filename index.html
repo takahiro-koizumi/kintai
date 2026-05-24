@@ -681,7 +681,22 @@ function saveState() {
 function getWorker(id) { return state.workers.find(w => w.id === id); }
 function workerName(id) { const w = getWorker(id); return w ? w.name : '(削除済み)'; }
 function recordsOn(date) { return state.records.filter(r => r.date === date); }
-function openRecord(workerId) { return state.records.find(r => r.workerId === workerId && !r.out); }
+function openRecord(workerId) {
+  // 当日の未クローズrecordを優先。なければ前日の未クローズで出勤から12時間以内なら日跨ぎ勤務として返す。
+  // それ以上前のrecordは退勤忘れとみなし、新規出勤打刻を許容する（古いopen recordへ誤って退勤を書き込まない）。
+  const today = todayYMD();
+  let r = state.records.find(x => x.workerId === workerId && !x.out && x.date === today);
+  if (r) return r;
+  const now = new Date();
+  const yest = todayYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  r = state.records.find(x => x.workerId === workerId && !x.out && x.date === yest);
+  if (r && r.in) {
+    const inMin = hmToMin(r.in);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    if (inMin != null && ((1440 - inMin) + nowMin) <= 12 * 60) return r;
+  }
+  return null;
+}
 function ymdOfDate(d) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
@@ -764,7 +779,8 @@ function recOvertimeMin(r) {
   const early = state.settings.includeEarlyAsOvertime ? Math.max(0, ws - inMin) : 0;
   let total = late + early;
   const unit = Math.max(0, state.settings.overtimeRoundMin || 0);
-  if (unit > 0) total = Math.floor(total / unit) * unit;
+  // 切り上げ（労基法上、切り捨ては労働者不利のため避ける）。残業0分は0のまま。
+  if (unit > 0 && total > 0) total = Math.ceil(total / unit) * unit;
   return Math.min(wk, total);
 }
 function recHolidayMin(r) {
@@ -1256,7 +1272,9 @@ function showModal(id) { document.getElementById(id).classList.add('show'); }
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
 function fillRecordModal(r) {
   const sel = document.getElementById('rec-worker');
-  sel.innerHTML = '<option value="">— 選択 —</option>' + state.workers.map(function (w) {
+  // 無効化作業員は新規追加では選択不可。ただし編集中レコードの担当者は履歴閲覧のため表示する。
+  const workers = state.workers.filter(w => w.active || w.id === r.workerId);
+  sel.innerHTML = '<option value="">— 選択 —</option>' + workers.map(function (w) {
     return '<option value="' + w.id + '"' + (w.id === r.workerId ? ' selected' : '') + '>' +
       esc(w.name) + (w.active ? '' : '（無効）') + '</option>';
   }).join('');
@@ -1745,10 +1763,18 @@ async function dbxCheckRemoteRev() {
 async function dbxAutoPullIfChanged() {
   if (!dbxToken || _dbxPending) return;
   if (document.visibilityState !== 'visible') return;
+  // モーダル表示中・編集中は自動pullスキップ（編集消失防止）
+  if (document.querySelector('.modal-bg.show')) return;
   const remoteRev = await dbxCheckRemoteRev();
   if (remoteRev && _lastDbxRev && remoteRev === _lastDbxRev) return;
   const remote = await dbxLoad(true);
   if (!remote) return;
+  // 空データ上書き防御：リモートのworkersが空でローカルにあれば自動pull中止
+  if (Array.isArray(remote.workers) && remote.workers.length === 0 && state.workers.length > 0) {
+    console.warn('[Dropbox] Remote workers empty but local has data. Auto-pull skipped.');
+    setDbxStatus('error', '空データ検出 手動取得推奨');
+    return;
+  }
   if (JSON.stringify(remote) === JSON.stringify(state)) return;
   state = normalizeState(remote);
   saveLocal();
