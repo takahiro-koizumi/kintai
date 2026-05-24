@@ -135,7 +135,8 @@
   /* ===== Date nav ===== */
   .date-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .date-nav button { padding: 8px 12px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; font-size: 14px; }
-  .date-nav .lbl { font-weight: 700; font-size: 16px; min-width: 130px; text-align: center; }
+  .date-nav .lbl { font-weight: 700; font-size: 16px; min-width: 110px; text-align: center; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15; }
+  .date-nav .lbl .sub { font-size: 11px; font-weight: 500; color: #94a3b8; margin-top: 1px; letter-spacing: 0; }
   .date-nav .spacer { flex: 1; }
   .row-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 
@@ -343,7 +344,7 @@
       <div class="view-pad">
         <div class="date-nav">
           <button onclick="shiftMonth(-1)">◀</button>
-          <span class="lbl" id="month-label">--</span>
+          <span class="lbl" id="month-label"><span id="month-label-main">--</span><span id="month-label-sub" class="sub"></span></span>
           <button onclick="shiftMonth(1)">▶</button>
           <span class="spacer"></span>
           <button class="btn-sm" onclick="exportDetailCSV()">明細CSV</button>
@@ -417,7 +418,7 @@
           <div class="set-row">
             <label>締め日</label>
             <input type="number" id="set-cutoff" step="1" min="1" max="31" style="width:80px"> 日
-            <span style="font-size:11.5px;color:#94a3b8">(例: 20 → 前月21日〜当月20日を当月分として集計。31で月末締め)</span>
+            <span style="font-size:11.5px;color:#94a3b8">(例: 20 → 前月21日〜当月20日を当月分として集計。31で月末締め。29/30は短い月で末日にクランプ)</span>
           </div>
           <div class="set-row">
             <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-early"> 早出を残業に含める</label>
@@ -585,7 +586,7 @@ const COMPANY_HOLIDAYS_GREEN = new Set([
 let state = null;
 let currentView = 'punch';
 let viewDate = todayYMD();
-let viewMonth = { y: new Date().getFullYear(), m: new Date().getMonth() + 1 };
+let viewMonth = { y: new Date().getFullYear(), m: new Date().getMonth() + 1 }; // loadState後にmonthOfDate(today)で上書き
 let editingRecordId = null;
 let wmWorkerId = null;
 let qrModalWorkerId = null;
@@ -684,13 +685,23 @@ function openRecord(workerId) { return state.records.find(r => r.workerId === wo
 function ymdOfDate(d) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
+function getCutoffDay() {
+  const c = state && state.settings ? Number(state.settings.cutoffDay) : 20;
+  return (Number.isFinite(c) && c >= 1 && c <= 31) ? c : 20;
+}
 function monthRange(y, m) {
-  const c = state.settings.cutoffDay || 20;
+  const c = getCutoffDay();
   if (c >= 31) {
     return { start: new Date(y, m - 1, 1), end: new Date(y, m, 0) };
   }
-  // 「y年m月分」= 前月(c+1)日 〜 当月c日。Dateコンストラクタが繰り上がりを処理する。
-  return { start: new Date(y, m - 2, c + 1), end: new Date(y, m - 1, c) };
+  // 短い月でDateコンストラクタの繰り上がりが起きないよう、当月末日／前月末日でクランプする
+  const prevLast = new Date(y, m - 1, 0).getDate(); // 前月末日
+  const currLast = new Date(y, m, 0).getDate();     // 当月末日
+  const start = (c + 1 > prevLast)
+    ? new Date(y, m - 1, 1)               // 前月にc+1日が無ければ当月1日始まり
+    : new Date(y, m - 2, c + 1);
+  const end = new Date(y, m - 1, Math.min(c, currLast));
+  return { start, end };
 }
 function monthRangeYmd(y, m) {
   const r = monthRange(y, m);
@@ -698,8 +709,21 @@ function monthRangeYmd(y, m) {
 }
 function monthRangeLabel(y, m) {
   const r = monthRange(y, m);
-  return (r.start.getMonth() + 1) + '/' + r.start.getDate() + '〜' +
+  const sy = r.start.getFullYear(), ey = r.end.getFullYear();
+  const head = (sy !== ey ? sy + '/' : '');
+  return head + (r.start.getMonth() + 1) + '/' + r.start.getDate() + '〜' +
          (r.end.getMonth() + 1) + '/' + r.end.getDate();
+}
+function monthOfDate(ymd) {
+  // 指定日が属する集計期間の {y, m} を返す
+  const d = parseYMD(ymd);
+  if (!d) return { y: new Date().getFullYear(), m: new Date().getMonth() + 1 };
+  const c = getCutoffDay();
+  let y = d.getFullYear();
+  let m = d.getMonth() + 1;
+  if (c < 31 && d.getDate() > c) m++;
+  while (m > 12) { m -= 12; y++; }
+  return { y, m };
 }
 function recordsInMonth(y, m) {
   const { start, end } = monthRangeYmd(y, m);
@@ -1044,8 +1068,8 @@ function monthWorkerIds() {
   return [...ids];
 }
 function renderMonth() {
-  document.getElementById('month-label').textContent =
-    viewMonth.y + '年' + viewMonth.m + '月分（' + monthRangeLabel(viewMonth.y, viewMonth.m) + '）';
+  document.getElementById('month-label-main').textContent = viewMonth.y + '年' + viewMonth.m + '月分';
+  document.getElementById('month-label-sub').textContent = monthRangeLabel(viewMonth.y, viewMonth.m);
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
   const byW = {};
   recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
@@ -1271,9 +1295,11 @@ function openAddRecord() {
   showModal('rec-modal');
 }
 function addRecordForWm() {
-  const now = new Date();
-  const sameMonth = (viewMonth.y === now.getFullYear() && viewMonth.m === now.getMonth() + 1);
-  const d = sameMonth ? todayYMD() : viewMonth.y + '-' + pad(viewMonth.m) + '-01';
+  // 今日が表示中の集計期間に含まれていれば今日、外れていれば期間の最終日を初期値にする
+  const today = todayYMD();
+  const tm = monthOfDate(today);
+  const inView = (tm.y === viewMonth.y && tm.m === viewMonth.m);
+  const d = inView ? today : monthRangeYmd(viewMonth.y, viewMonth.m).end;
   editingRecordId = null;
   fillRecordModal({ workerId: wmWorkerId, date: d, in: '', out: '', breakMin: state.settings.defaultBreakMin, note: '' });
   document.getElementById('rec-modal-title').textContent = '勤怠を追加';
@@ -1348,20 +1374,32 @@ function saveWorkSettings() {
   const ots = document.getElementById('set-otstart').value;
   const otr = parseInt(document.getElementById('set-otround').value, 10);
   const b = parseInt(document.getElementById('set-break').value, 10);
-  const cd = parseInt(document.getElementById('set-cutoff').value, 10);
+  const cdRaw = document.getElementById('set-cutoff').value;
+  const cd = parseInt(cdRaw, 10);
+  const cdValid = !isNaN(cd) && cd >= 1 && cd <= 31;
   if (/^\d{1,2}:\d{2}$/.test(ws)) state.settings.workStart = ws;
   if (/^\d{1,2}:\d{2}$/.test(we)) state.settings.workEnd = we;
   if (/^\d{1,2}:\d{2}$/.test(ots)) state.settings.overtimeStart = ots;
   if (!isNaN(otr) && otr >= 0) state.settings.overtimeRoundMin = otr;
   if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
-  if (!isNaN(cd) && cd >= 1 && cd <= 31) state.settings.cutoffDay = cd;
+  // 締め日変更は過去の月次集計範囲を全て再計算するため確認
+  if (cdValid && cd !== state.settings.cutoffDay) {
+    if (!confirm('締め日を ' + state.settings.cutoffDay + '日 → ' + cd + '日 に変更すると、過去の月次集計の範囲もすべて再計算されます。よろしいですか？')) return;
+    state.settings.cutoffDay = cd;
+  }
   state.settings.includeEarlyAsOvertime = document.getElementById('set-early').checked;
   state.settings.useCompanyCalendar = document.getElementById('set-calendar').checked;
   state.settings.weekendAsHoliday = document.getElementById('set-weekend').checked;
   state.settings.companyName = document.getElementById('set-company').value.trim();
   saveState();
+  // 締め日変更で現在の集計期間表示がズレないように再計算
+  viewMonth = monthOfDate(todayYMD());
   renderAll();
-  alert('勤務設定を保存しました');
+  if (!cdValid && cdRaw !== '') {
+    alert('締め日は1〜31の範囲で指定してください（締め日のみ保存しませんでした）。\nその他の項目は保存しました。');
+  } else {
+    alert('勤務設定を保存しました');
+  }
 }
 
 /* ========== CSV出力 ========== */
@@ -1387,7 +1425,7 @@ function exportDetailCSV() {
       recIsHoliday(r) ? 'はい' : 'いいえ', r.note || '']);
   });
   const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
-  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '～' + rng.end + ').csv');
+  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
 }
 function exportSummaryCSV() {
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
@@ -1408,7 +1446,7 @@ function exportSummaryCSV() {
     rows.push([workerName(id), days, decHours(w), decHours(o), holDates.size]);
   });
   const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
-  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '～' + rng.end + ').csv');
+  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
 }
 
 /* ========== バックアップ ========== */
@@ -1724,6 +1762,7 @@ async function dbxManualPull() {
     state = normalizeState(remote);
     saveLocal();
     renderAll();
+    if (currentView === 'settings') renderSettings();
     alert('最新の勤怠データを取得しました');
   } else if (remote === null) {
     alert('Dropboxにまだデータがありません');
@@ -1762,6 +1801,7 @@ document.querySelectorAll('.modal-bg').forEach(function (m) {
 
 /* ========== 初期化 ========== */
 loadState();
+viewMonth = monthOfDate(todayYMD()); // 今日が属する集計期間で開く
 renderAll();
 tickClock();
 setInterval(tickClock, 1000);
