@@ -415,6 +415,11 @@
             <input type="number" id="set-break" step="5" min="0"> 分（打刻時の初期値）
           </div>
           <div class="set-row">
+            <label>締め日</label>
+            <input type="number" id="set-cutoff" step="1" min="1" max="31" style="width:80px"> 日
+            <span style="font-size:11.5px;color:#94a3b8">(例: 20 → 前月21日〜当月20日を当月分として集計。31で月末締め)</span>
+          </div>
+          <div class="set-row">
             <label style="min-width:auto;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="set-early"> 早出を残業に含める</label>
             <span style="font-size:11.5px;color:#94a3b8">(出勤が定時開始より早かった分も加算)</span>
           </div>
@@ -625,6 +630,7 @@ function normalizeState(d) {
     includeEarlyAsOvertime: true,
     weekendAsHoliday: true,
     useCompanyCalendar: true,
+    cutoffDay: 20,
     companyName: '有限会社 大田原工業'
   };
   const s = {
@@ -638,6 +644,8 @@ function normalizeState(d) {
   if (!/^\d{1,2}:\d{2}$/.test(s.settings.overtimeStart)) s.settings.overtimeStart = s.settings.workEnd;
   if (typeof s.settings.overtimeRoundMin !== 'number' || s.settings.overtimeRoundMin < 0) s.settings.overtimeRoundMin = 30;
   if (typeof s.settings.defaultBreakMin !== 'number' || s.settings.defaultBreakMin < 0) s.settings.defaultBreakMin = 90;
+  const cd = Number(s.settings.cutoffDay);
+  s.settings.cutoffDay = (Number.isFinite(cd) && cd >= 1 && cd <= 31) ? Math.floor(cd) : 20;
   s.settings.includeEarlyAsOvertime = (s.settings.includeEarlyAsOvertime !== false);
   s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
   s.settings.useCompanyCalendar = (s.settings.useCompanyCalendar !== false);
@@ -673,9 +681,29 @@ function getWorker(id) { return state.workers.find(w => w.id === id); }
 function workerName(id) { const w = getWorker(id); return w ? w.name : '(削除済み)'; }
 function recordsOn(date) { return state.records.filter(r => r.date === date); }
 function openRecord(workerId) { return state.records.find(r => r.workerId === workerId && !r.out); }
+function ymdOfDate(d) {
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+function monthRange(y, m) {
+  const c = state.settings.cutoffDay || 20;
+  if (c >= 31) {
+    return { start: new Date(y, m - 1, 1), end: new Date(y, m, 0) };
+  }
+  // 「y年m月分」= 前月(c+1)日 〜 当月c日。Dateコンストラクタが繰り上がりを処理する。
+  return { start: new Date(y, m - 2, c + 1), end: new Date(y, m - 1, c) };
+}
+function monthRangeYmd(y, m) {
+  const r = monthRange(y, m);
+  return { start: ymdOfDate(r.start), end: ymdOfDate(r.end) };
+}
+function monthRangeLabel(y, m) {
+  const r = monthRange(y, m);
+  return (r.start.getMonth() + 1) + '/' + r.start.getDate() + '〜' +
+         (r.end.getMonth() + 1) + '/' + r.end.getDate();
+}
 function recordsInMonth(y, m) {
-  const p = y + '-' + pad(m);
-  return state.records.filter(r => r.date && r.date.indexOf(p) === 0);
+  const { start, end } = monthRangeYmd(y, m);
+  return state.records.filter(r => r.date && r.date >= start && r.date <= end);
 }
 function recWorkMin(r) {
   const i = hmToMin(r.in), o = hmToMin(r.out);
@@ -1016,7 +1044,8 @@ function monthWorkerIds() {
   return [...ids];
 }
 function renderMonth() {
-  document.getElementById('month-label').textContent = viewMonth.y + '年' + viewMonth.m + '月';
+  document.getElementById('month-label').textContent =
+    viewMonth.y + '年' + viewMonth.m + '月分（' + monthRangeLabel(viewMonth.y, viewMonth.m) + '）';
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
   const byW = {};
   recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
@@ -1061,7 +1090,8 @@ function openWorkerMonth(id) {
 }
 function renderWorkerMonth() {
   const id = wmWorkerId;
-  document.getElementById('wm-title').textContent = workerName(id) + '　' + viewMonth.y + '年' + viewMonth.m + '月';
+  document.getElementById('wm-title').textContent =
+    workerName(id) + '　' + viewMonth.y + '年' + viewMonth.m + '月分（' + monthRangeLabel(viewMonth.y, viewMonth.m) + '）';
   const rs = recordsInMonth(viewMonth.y, viewMonth.m).filter(r => r.workerId === id)
     .sort((a, b) => a.date.localeCompare(b.date) || (a.in || '').localeCompare(b.in || ''));
   const body = document.getElementById('wm-body');
@@ -1303,6 +1333,7 @@ function renderSettings() {
   document.getElementById('set-otstart').value = state.settings.overtimeStart;
   document.getElementById('set-otround').value = state.settings.overtimeRoundMin;
   document.getElementById('set-break').value = state.settings.defaultBreakMin;
+  document.getElementById('set-cutoff').value = state.settings.cutoffDay;
   document.getElementById('set-early').checked = state.settings.includeEarlyAsOvertime;
   document.getElementById('set-calendar').checked = state.settings.useCompanyCalendar;
   document.getElementById('set-weekend').checked = state.settings.weekendAsHoliday;
@@ -1317,11 +1348,13 @@ function saveWorkSettings() {
   const ots = document.getElementById('set-otstart').value;
   const otr = parseInt(document.getElementById('set-otround').value, 10);
   const b = parseInt(document.getElementById('set-break').value, 10);
+  const cd = parseInt(document.getElementById('set-cutoff').value, 10);
   if (/^\d{1,2}:\d{2}$/.test(ws)) state.settings.workStart = ws;
   if (/^\d{1,2}:\d{2}$/.test(we)) state.settings.workEnd = we;
   if (/^\d{1,2}:\d{2}$/.test(ots)) state.settings.overtimeStart = ots;
   if (!isNaN(otr) && otr >= 0) state.settings.overtimeRoundMin = otr;
   if (!isNaN(b) && b >= 0) state.settings.defaultBreakMin = b;
+  if (!isNaN(cd) && cd >= 1 && cd <= 31) state.settings.cutoffDay = cd;
   state.settings.includeEarlyAsOvertime = document.getElementById('set-early').checked;
   state.settings.useCompanyCalendar = document.getElementById('set-calendar').checked;
   state.settings.weekendAsHoliday = document.getElementById('set-weekend').checked;
@@ -1353,7 +1386,8 @@ function exportDetailCSV() {
       r.breakMin || 0, decHours(recWorkMin(r)), decHours(recOvertimeMin(r)),
       recIsHoliday(r) ? 'はい' : 'いいえ', r.note || '']);
   });
-  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
+  const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
+  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '～' + rng.end + ').csv');
 }
 function exportSummaryCSV() {
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
@@ -1373,7 +1407,8 @@ function exportSummaryCSV() {
     });
     rows.push([workerName(id), days, decHours(w), decHours(o), holDates.size]);
   });
-  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '.csv');
+  const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
+  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '～' + rng.end + ').csv');
 }
 
 /* ========== バックアップ ========== */
