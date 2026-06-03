@@ -178,7 +178,23 @@
   .wk-card.inactive { opacity: .6; }
   .wk-name { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
   .wk-name .tag { font-size: 11px; background: #e2e8f0; color: #475569; padding: 2px 7px; border-radius: 8px; font-weight: 700; }
-  .wk-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .wk-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .wk-office { padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; background: #fff; color: #1f2937; margin-right: auto; }
+
+  /* ===== Office grouping / filter ===== */
+  .office-filter { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+  .office-filter:empty { display: none; }
+  .office-filter .seg { border: 0; border-left: 1px solid #e5e7eb; background: #fff; color: #475569; font-size: 13px; font-weight: 600; padding: 7px 15px; }
+  .office-filter .seg:first-child { border-left: 0; }
+  .office-filter .seg.active { background: #2563eb; color: #fff; }
+  .roster-wrap { display: flex; flex-direction: column; gap: 14px; }
+  .office-head { font-weight: 700; font-size: 13px; color: #2b3a4a; background: #dde3e9; border-radius: 7px; padding: 6px 11px; margin-bottom: 8px; }
+  .office-head .cnt { font-weight: 600; font-size: 11px; color: #64748b; margin-left: 5px; }
+  .wk-group-head { font-weight: 700; font-size: 13px; color: #2b3a4a; background: #dde3e9; border-radius: 7px; padding: 6px 11px; margin: 16px 0 8px; }
+  .wk-group-head:first-child { margin-top: 0; }
+  .wk-group-head .cnt { font-weight: 600; font-size: 11px; color: #64748b; margin-left: 5px; }
+  .grid-table tr.grp-row td { background: #dde3e9; color: #2b3a4a; font-weight: 700; text-align: left; font-size: 12.5px; }
+  .grid-table tr.grp-sub td { background: #eef1f4; font-weight: 700; color: #334155; }
 
   /* ===== Settings cards ===== */
   .card {
@@ -318,7 +334,7 @@
             <span id="punch-summary"></span>
           </div>
           <p class="hint" style="margin:0 0 8px">QRが使えない時は、下の名前をタップして手動打刻できます。</p>
-          <div class="roster" id="roster"></div>
+          <div class="roster-wrap" id="roster"></div>
         </div>
       </div>
     </section>
@@ -334,6 +350,7 @@
           <span class="spacer"></span>
           <button class="btn-sm" onclick="openAddRecord()">＋手動で追加</button>
         </div>
+        <div id="today-office-filter"></div>
         <div class="unmarked" id="today-unmarked"></div>
         <div id="today-table"></div>
       </div>
@@ -350,6 +367,7 @@
           <button class="btn-sm" onclick="exportDetailCSV()">明細CSV</button>
           <button class="btn-sm" onclick="exportSummaryCSV()">集計CSV</button>
         </div>
+        <div id="month-office-filter"></div>
         <div id="month-table"></div>
       </div>
     </section>
@@ -547,6 +565,7 @@ const QR_PREFIX = 'KNT1:';
 const DBX_APP_KEY = 'w0akss3w157oa53';
 const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/事務/勤怠管理/kintai.json';
 const WD = ['日','月','火','水','木','金','土'];
+const OFFICES = ['本事務所', '旧事務所']; // 事務所区分（固定2種）。未設定='' は「未分類」扱い
 
 // 会社カレンダー（配置ボードと同じ、休日予定表2025.11〜2026.10より）
 // 国民の祝日
@@ -588,6 +607,7 @@ let currentView = 'punch';
 let viewDate = todayYMD();
 let viewMonth = { y: new Date().getFullYear(), m: new Date().getMonth() + 1 }; // loadState後にmonthOfDate(today)で上書き
 let editingRecordId = null;
+let viewOffice = ''; // 日別・月次の事務所フィルタ（'' = 全体）
 let wmWorkerId = null;
 let qrModalWorkerId = null;
 let lastPunch = {};      // workerId -> {ts,type,hm}
@@ -651,7 +671,8 @@ function normalizeState(d) {
   s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
   s.settings.useCompanyCalendar = (s.settings.useCompanyCalendar !== false);
   s.workers = s.workers.filter(w => w && w.id).map(w => ({
-    id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false
+    id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false,
+    office: OFFICES.indexOf(w.office) >= 0 ? w.office : ''
   }));
   s.records = s.records.filter(r => r && r.id && r.workerId).map(r => {
     const o = {
@@ -785,6 +806,35 @@ function recOvertimeMin(r) {
 }
 function recHolidayMin(r) {
   return recIsHoliday(r) ? (recWorkMin(r) || 0) : 0;
+}
+
+/* ========== 事務所区分（本事務所 / 旧事務所 / 未分類） ========== */
+function workerOffice(id) { const w = getWorker(id); return w ? (w.office || '') : ''; }
+function officeLabel(o) { return o || '未分類'; }
+function officeOrder(o) { const i = OFFICES.indexOf(o); return i < 0 ? OFFICES.length : i; }
+function anyOfficeAssigned() { return state.workers.some(w => OFFICES.indexOf(w.office) >= 0); }
+// 表示中フィルタ（事務所が一つも割り当てられていない間は無効＝全体）
+function effectiveOffice() { return anyOfficeAssigned() ? viewOffice : ''; }
+function workerMatchesOffice(id) { const flt = effectiveOffice(); return !flt || workerOffice(id) === flt; }
+// idリストを事務所ごとにグループ化（空グループは除外、本→旧→未分類の順）
+function groupIdsByOffice(ids) {
+  return OFFICES.concat(['']).map(function (o) {
+    return { office: o, label: officeLabel(o), ids: ids.filter(id => workerOffice(id) === o) };
+  }).filter(g => g.ids.length);
+}
+// [全体][本事務所][旧事務所] の絞り込みバー。未割当の間は空文字（非表示）
+function officeFilterBarHtml() {
+  if (!anyOfficeAssigned()) return '';
+  const opts = [['', '全体']].concat(OFFICES.map(o => [o, o]));
+  return '<div class="office-filter">' + opts.map(function (o) {
+    const active = (viewOffice === o[0]) ? ' active' : '';
+    return '<button type="button" class="seg' + active + '" onclick="setViewOffice(\'' + o[0] + '\')">' + esc(o[1]) + '</button>';
+  }).join('') + '</div>';
+}
+function setViewOffice(o) {
+  viewOffice = (o === '本事務所' || o === '旧事務所') ? o : '';
+  if (currentView === 'today') renderToday();
+  if (currentView === 'month') renderMonth();
 }
 
 /* ========== 画面切替 ========== */
@@ -994,7 +1044,7 @@ function renderRoster() {
   }
   const today = todayYMD();
   let inN = 0, outN = 0, noN = 0;
-  el.innerHTML = ws.map(function (w) {
+  function itemHtml(w) {
     const open = openRecord(w.id);
     const todays = recordsOn(today).filter(r => r.workerId === w.id);
     let cls, stat;
@@ -1012,7 +1062,18 @@ function renderRoster() {
     return '<div class="r-item ' + cls + '" onclick="manualPunch(\'' + w.id + '\')">' +
            '<div class="r-name">' + esc(w.name) + '</div>' +
            '<div class="r-stat">' + stat + '</div></div>';
-  }).join('');
+  }
+  if (anyOfficeAssigned()) {
+    el.innerHTML = OFFICES.concat(['']).map(function (o) {
+      const gw = ws.filter(w => (w.office || '') === o);
+      if (!gw.length) return '';
+      return '<div class="roster-group"><div class="office-head">' + esc(officeLabel(o)) +
+        '<span class="cnt">' + gw.length + '名</span></div>' +
+        '<div class="roster">' + gw.map(itemHtml).join('') + '</div></div>';
+    }).join('');
+  } else {
+    el.innerHTML = '<div class="roster">' + ws.map(itemHtml).join('') + '</div>';
+  }
   document.getElementById('punch-summary').textContent =
     '出勤中 ' + inN + '名 ／ 退勤済 ' + outN + '名 ／ 未打刻 ' + noN + '名';
 }
@@ -1027,12 +1088,18 @@ function shiftDay(n) {
 function gotoToday() { viewDate = todayYMD(); renderToday(); }
 function renderToday() {
   document.getElementById('today-label').textContent = fmtDateLabel(viewDate);
-  const recs = recordsOn(viewDate).slice().sort(function (a, b) {
-    return (a.in || '').localeCompare(b.in || '') ||
+  document.getElementById('today-office-filter').innerHTML = officeFilterBarHtml();
+  const flt = effectiveOffice();
+  const grouped = !flt && anyOfficeAssigned();
+  let recs = recordsOn(viewDate).slice();
+  if (flt) recs = recs.filter(r => workerOffice(r.workerId) === flt);
+  recs.sort(function (a, b) {
+    return officeOrder(workerOffice(a.workerId)) - officeOrder(workerOffice(b.workerId)) ||
+           (a.in || '').localeCompare(b.in || '') ||
            workerName(a.workerId).localeCompare(workerName(b.workerId), 'ja');
   });
   const marked = new Set(recs.map(r => r.workerId));
-  const un = state.workers.filter(w => w.active && !marked.has(w.id)).map(w => w.name);
+  const un = state.workers.filter(w => w.active && workerMatchesOffice(w.id) && !marked.has(w.id)).map(w => w.name);
   document.getElementById('today-unmarked').innerHTML =
     un.length ? '<span class="um-label">未打刻</span>' + un.map(esc).join('、') : '';
 
@@ -1041,16 +1108,21 @@ function renderToday() {
     t.innerHTML = '<div class="empty">この日の勤怠記録はありません。</div>';
     return;
   }
-  let totWork = 0, totOt = 0, totHolCount = 0;
+  let totWork = 0, totOt = 0, totHolCount = 0, lastOffice = null;
   const rows = recs.map(function (r) {
     const wk = recWorkMin(r), ov = recOvertimeMin(r);
     const hol = recIsHoliday(r);
     if (wk != null) totWork += wk;
     if (ov != null) totOt += ov;
     if (hol) totHolCount++;
+    let head = '';
+    if (grouped) {
+      const o = workerOffice(r.workerId);
+      if (o !== lastOffice) { lastOffice = o; head = '<tr class="grp-row"><td colspan="7">' + esc(officeLabel(o)) + '</td></tr>'; }
+    }
     const holBadge = hol ? '<span class="badge hol">休日</span> ' : '';
     const stat = holBadge + (r.out ? '<span class="badge out">退勤済</span>' : '<span class="badge in">出勤中</span>');
-    return '<tr class="' + (hol ? 'holiday-row' : '') + '" onclick="openEditRecord(\'' + r.id + '\')">' +
+    return head + '<tr class="' + (hol ? 'holiday-row' : '') + '" onclick="openEditRecord(\'' + r.id + '\')">' +
       '<td class="nm">' + esc(workerName(r.workerId)) + '</td>' +
       '<td>' + (r.in || '—') + '</td>' +
       '<td>' + (r.out || '—') + '</td>' +
@@ -1086,17 +1158,19 @@ function monthWorkerIds() {
 function renderMonth() {
   document.getElementById('month-label-main').textContent = viewMonth.y + '年' + viewMonth.m + '月分';
   document.getElementById('month-label-sub').textContent = monthRangeLabel(viewMonth.y, viewMonth.m);
+  document.getElementById('month-office-filter').innerHTML = officeFilterBarHtml();
+  const flt = effectiveOffice();
+  const grouped = !flt && anyOfficeAssigned();
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
   const byW = {};
   recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
-  const ids = monthWorkerIds();
+  let ids = monthWorkerIds();
+  if (flt) ids = ids.filter(id => workerOffice(id) === flt);
   const el = document.getElementById('month-table');
   if (!ids.length) { el.innerHTML = '<div class="empty">記録がありません。</div>'; return; }
 
-  let tDays = 0, tWork = 0, tOt = 0, tHolDays = 0;
-  const rows = ids.map(function (id) {
+  function statOf(id) {
     const rs = byW[id] || [];
-    const days = new Set(rs.map(r => r.date)).size;
     const holDates = new Set();
     let work = 0, ot = 0;
     rs.forEach(function (r) {
@@ -1104,22 +1178,44 @@ function renderMonth() {
       const o = recOvertimeMin(r); if (o != null) ot += o;
       if (recIsHoliday(r)) holDates.add(r.date);
     });
-    const holDays = holDates.size;
-    tDays += days; tWork += work; tOt += ot; tHolDays += holDays;
+    return { days: new Set(rs.map(r => r.date)).size, work: work, ot: ot, holDays: holDates.size };
+  }
+  function workerRow(id, s) {
     return '<tr onclick="openWorkerMonth(\'' + id + '\')">' +
       '<td class="nm">' + esc(workerName(id)) + '</td>' +
-      '<td>' + days + '日</td>' +
-      '<td>' + fmtHM(work) + '</td>' +
-      '<td class="' + (ot ? 'ot' : '') + '">' + fmtHM(ot) + '</td>' +
-      '<td class="' + (holDays ? 'hol-col' : '') + '">' + (holDays ? holDays + '日' : '—') + '</td></tr>';
-  }).join('');
+      '<td>' + s.days + '日</td>' +
+      '<td>' + fmtHM(s.work) + '</td>' +
+      '<td class="' + (s.ot ? 'ot' : '') + '">' + fmtHM(s.ot) + '</td>' +
+      '<td class="' + (s.holDays ? 'hol-col' : '') + '">' + (s.holDays ? s.holDays + '日' : '—') + '</td></tr>';
+  }
+  const sortByName = (a, b) => workerName(a).localeCompare(workerName(b), 'ja');
+  const groups = grouped ? groupIdsByOffice(ids)
+                         : [{ office: flt, label: officeLabel(flt), ids: ids.slice() }];
+  const tot = { days: 0, work: 0, ot: 0, holDays: 0 };
+  let body = '';
+  groups.forEach(function (g) {
+    if (grouped) body += '<tr class="grp-row"><td colspan="5">' + esc(g.label) + '</td></tr>';
+    const sub = { days: 0, work: 0, ot: 0, holDays: 0 };
+    g.ids.slice().sort(sortByName).forEach(function (id) {
+      const s = statOf(id);
+      sub.days += s.days; sub.work += s.work; sub.ot += s.ot; sub.holDays += s.holDays;
+      body += workerRow(id, s);
+    });
+    tot.days += sub.days; tot.work += sub.work; tot.ot += sub.ot; tot.holDays += sub.holDays;
+    if (grouped) {
+      body += '<tr class="grp-sub"><td class="nm">' + esc(g.label) + ' 小計</td>' +
+        '<td>' + sub.days + '日</td><td>' + fmtHM(sub.work) + '</td>' +
+        '<td class="' + (sub.ot ? 'ot' : '') + '">' + fmtHM(sub.ot) + '</td>' +
+        '<td class="' + (sub.holDays ? 'hol-col' : '') + '">' + (sub.holDays ? sub.holDays + '日' : '—') + '</td></tr>';
+    }
+  });
   el.innerHTML =
     '<div class="table-wrap"><table class="grid-table">' +
     '<thead><tr><th>氏名</th><th>出勤日数</th><th>実働計</th><th>残業計</th><th>休日出勤</th></tr></thead>' +
-    '<tbody>' + rows + '</tbody>' +
-    '<tfoot><tr><td class="nm">合計</td><td>' + tDays + '日</td>' +
-    '<td>' + fmtHM(tWork) + '</td><td class="' + (tOt ? 'ot' : '') + '">' + fmtHM(tOt) + '</td>' +
-    '<td class="' + (tHolDays ? 'hol-col' : '') + '">' + (tHolDays ? tHolDays + '日' : '—') + '</td></tr></tfoot>' +
+    '<tbody>' + body + '</tbody>' +
+    '<tfoot><tr><td class="nm">合計</td><td>' + tot.days + '日</td>' +
+    '<td>' + fmtHM(tot.work) + '</td><td class="' + (tot.ot ? 'ot' : '') + '">' + fmtHM(tot.ot) + '</td>' +
+    '<td class="' + (tot.holDays ? 'hol-col' : '') + '">' + (tot.holDays ? tot.holDays + '日' : '—') + '</td></tr></tfoot>' +
     '</table></div>' +
     '<p class="hint">氏名をタップすると日別の明細を確認・修正できます。</p>';
 }
@@ -1164,22 +1260,47 @@ function renderWorkerMonth() {
 }
 
 /* ========== 作業員管理 ========== */
+function officeSelectHtml(w) {
+  const cur = w.office || '';
+  const opts = [['', '未分類']].concat(OFFICES.map(o => [o, o]));
+  return '<select class="wk-office" title="所属事務所" onchange="changeWorkerOffice(\'' + w.id + '\', this.value)">' +
+    opts.map(o => '<option value="' + o[0] + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') +
+    '</select>';
+}
+function workerCardHtml(w) {
+  return '<div class="wk-card ' + (w.active ? '' : 'inactive') + '">' +
+    '<div class="wk-name">' + esc(w.name) + (w.active ? '' : ' <span class="tag">無効</span>') + '</div>' +
+    '<div class="wk-acts">' +
+      officeSelectHtml(w) +
+      '<button class="btn-sm" onclick="showWorkerQr(\'' + w.id + '\')">QR表示</button>' +
+      '<button class="btn-sm" onclick="renameWorker(\'' + w.id + '\')">名前変更</button>' +
+      '<button class="btn-sm" onclick="toggleWorkerActive(\'' + w.id + '\')">' + (w.active ? '無効化' : '有効化') + '</button>' +
+      '<button class="btn-sm danger" onclick="deleteWorker(\'' + w.id + '\')">削除</button>' +
+    '</div></div>';
+}
 function renderWorkers() {
   const el = document.getElementById('workers-list');
   if (!state.workers.length) {
     el.innerHTML = '<div class="empty">作業員が登録されていません。「＋作業員を追加」から登録してください。</div>';
     return;
   }
-  el.innerHTML = state.workers.map(function (w) {
-    return '<div class="wk-card ' + (w.active ? '' : 'inactive') + '">' +
-      '<div class="wk-name">' + esc(w.name) + (w.active ? '' : ' <span class="tag">無効</span>') + '</div>' +
-      '<div class="wk-acts">' +
-        '<button class="btn-sm" onclick="showWorkerQr(\'' + w.id + '\')">QR表示</button>' +
-        '<button class="btn-sm" onclick="renameWorker(\'' + w.id + '\')">名前変更</button>' +
-        '<button class="btn-sm" onclick="toggleWorkerActive(\'' + w.id + '\')">' + (w.active ? '無効化' : '有効化') + '</button>' +
-        '<button class="btn-sm danger" onclick="deleteWorker(\'' + w.id + '\')">削除</button>' +
-      '</div></div>';
+  if (!anyOfficeAssigned()) {
+    el.innerHTML = state.workers.map(workerCardHtml).join('');
+    return;
+  }
+  el.innerHTML = OFFICES.concat(['']).map(function (o) {
+    const gw = state.workers.filter(w => (w.office || '') === o);
+    if (!gw.length) return '';
+    return '<div class="wk-group-head">' + esc(officeLabel(o)) + '<span class="cnt">' + gw.length + '名</span></div>' +
+      gw.map(workerCardHtml).join('');
   }).join('');
+}
+function changeWorkerOffice(id, val) {
+  const w = getWorker(id);
+  if (!w) return;
+  w.office = (val === '本事務所' || val === '旧事務所') ? val : '';
+  saveState();
+  renderAll();
 }
 function addWorker() {
   const name = (prompt('作業員の氏名を入力してください') || '').trim();
@@ -1430,28 +1551,38 @@ function writeCsv(rows, name) {
   download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), name);
 }
 function exportDetailCSV() {
-  const recs = recordsInMonth(viewMonth.y, viewMonth.m).slice().sort(function (a, b) {
-    return a.date.localeCompare(b.date) ||
+  const flt = effectiveOffice();
+  let recs = recordsInMonth(viewMonth.y, viewMonth.m).slice();
+  if (flt) recs = recs.filter(r => workerOffice(r.workerId) === flt);
+  recs.sort(function (a, b) {
+    return officeOrder(workerOffice(a.workerId)) - officeOrder(workerOffice(b.workerId)) ||
+           a.date.localeCompare(b.date) ||
            workerName(a.workerId).localeCompare(workerName(b.workerId), 'ja') ||
            (a.in || '').localeCompare(b.in || '');
   });
   if (!recs.length) { alert('この月の記録がありません'); return; }
-  const rows = [['日付', '曜日', '氏名', '出勤', '退勤', '休憩(分)', '実働(時間)', '残業(時間)', '休日', '備考']];
+  const rows = [['事務所', '日付', '曜日', '氏名', '出勤', '退勤', '休憩(分)', '実働(時間)', '残業(時間)', '休日', '備考']];
   recs.forEach(function (r) {
-    rows.push([r.date, weekdayJa(r.date), workerName(r.workerId), r.in || '', r.out || '',
+    rows.push([officeLabel(workerOffice(r.workerId)), r.date, weekdayJa(r.date), workerName(r.workerId), r.in || '', r.out || '',
       r.breakMin || 0, decHours(recWorkMin(r)), decHours(recOvertimeMin(r)),
       recIsHoliday(r) ? 'はい' : 'いいえ', r.note || '']);
   });
   const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
-  writeCsv(rows, '勤怠明細_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
+  const tag = flt ? '_' + flt : '';
+  writeCsv(rows, '勤怠明細' + tag + '_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
 }
 function exportSummaryCSV() {
+  const flt = effectiveOffice();
   const recs = recordsInMonth(viewMonth.y, viewMonth.m);
   if (!recs.length) { alert('この月の記録がありません'); return; }
   const byW = {};
   recs.forEach(r => { (byW[r.workerId] = byW[r.workerId] || []).push(r); });
-  const rows = [['氏名', '出勤日数', '実働計(時間)', '残業計(時間)', '休日出勤日数']];
-  monthWorkerIds().forEach(function (id) {
+  let ids = monthWorkerIds();
+  if (flt) ids = ids.filter(id => workerOffice(id) === flt);
+  ids.sort((a, b) => officeOrder(workerOffice(a)) - officeOrder(workerOffice(b)) ||
+                     workerName(a).localeCompare(workerName(b), 'ja'));
+  const rows = [['事務所', '氏名', '出勤日数', '実働計(時間)', '残業計(時間)', '休日出勤日数']];
+  ids.forEach(function (id) {
     const rs = byW[id] || [];
     const days = new Set(rs.map(r => r.date)).size;
     const holDates = new Set();
@@ -1461,10 +1592,11 @@ function exportSummaryCSV() {
       const b = recOvertimeMin(r); if (b != null) o += b;
       if (recIsHoliday(r)) holDates.add(r.date);
     });
-    rows.push([workerName(id), days, decHours(w), decHours(o), holDates.size]);
+    rows.push([officeLabel(workerOffice(id)), workerName(id), days, decHours(w), decHours(o), holDates.size]);
   });
   const rng = monthRangeYmd(viewMonth.y, viewMonth.m);
-  writeCsv(rows, '勤怠集計_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
+  const tag = flt ? '_' + flt : '';
+  writeCsv(rows, '勤怠集計' + tag + '_' + viewMonth.y + '-' + pad(viewMonth.m) + '分(' + rng.start + '〜' + rng.end + ').csv');
 }
 
 /* ========== バックアップ ========== */
