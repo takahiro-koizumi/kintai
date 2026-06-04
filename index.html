@@ -195,6 +195,10 @@
   .wk-group-head .cnt { font-weight: 600; font-size: 11px; color: #64748b; margin-left: 5px; }
   .grid-table tr.grp-row td { background: #dde3e9; color: #2b3a4a; font-weight: 700; text-align: left; font-size: 12.5px; }
   .grid-table tr.grp-sub td { background: #eef1f4; font-weight: 700; color: #334155; }
+  .ord-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 6px; background: #fff; }
+  .ord-row .ord-name { font-weight: 700; font-size: 14px; }
+  .ord-row .ord-btns { display: flex; gap: 6px; }
+  .btn-sm[disabled] { opacity: .4; cursor: default; }
 
   /* ===== Settings cards ===== */
   .card {
@@ -459,6 +463,12 @@
         </div>
 
         <div class="card">
+          <h3>事務所の表示順</h3>
+          <p class="desc">打刻・日別・月次・作業員の各画面で、事務所を並べる順番です。▲▼で入れ替えます（「未分類」は常に最後に表示されます）。</p>
+          <div id="office-order-list"></div>
+        </div>
+
+        <div class="card">
           <h3>データ</h3>
           <p class="desc">バックアップはこの端末に保存されます。復元すると現在のデータは置き換わります。</p>
           <div class="row-bar" style="margin:0">
@@ -652,7 +662,8 @@ function normalizeState(d) {
     weekendAsHoliday: true,
     useCompanyCalendar: true,
     cutoffDay: 20,
-    companyName: '有限会社 大田原工業'
+    companyName: '有限会社 大田原工業',
+    officeOrder: OFFICES.slice()
   };
   const s = {
     workers: Array.isArray(d.workers) ? d.workers : [],
@@ -670,6 +681,13 @@ function normalizeState(d) {
   s.settings.includeEarlyAsOvertime = (s.settings.includeEarlyAsOvertime !== false);
   s.settings.weekendAsHoliday = (s.settings.weekendAsHoliday !== false);
   s.settings.useCompanyCalendar = (s.settings.useCompanyCalendar !== false);
+  // 事務所の表示順: OFFICES の並べ替え（不正値は除去、欠けは末尾に補完）
+  {
+    let ord = Array.isArray(s.settings.officeOrder) ? s.settings.officeOrder.filter(o => OFFICES.indexOf(o) >= 0) : [];
+    ord = ord.filter((o, i) => ord.indexOf(o) === i);
+    OFFICES.forEach(o => { if (ord.indexOf(o) < 0) ord.push(o); });
+    s.settings.officeOrder = ord;
+  }
   s.workers = s.workers.filter(w => w && w.id).map(w => ({
     id: String(w.id), name: String(w.name || '(無名)'), active: w.active !== false,
     office: OFFICES.indexOf(w.office) >= 0 ? w.office : ''
@@ -811,21 +829,28 @@ function recHolidayMin(r) {
 /* ========== 事務所区分（本事務所 / 旧事務所 / 未分類） ========== */
 function workerOffice(id) { const w = getWorker(id); return w ? (w.office || '') : ''; }
 function officeLabel(o) { return o || '未分類'; }
-function officeOrder(o) { const i = OFFICES.indexOf(o); return i < 0 ? OFFICES.length : i; }
+// 表示順（settings.officeOrder を正としつつ、欠けは OFFICES の順で末尾補完）
+function officeOrderList() {
+  const ord = (state && state.settings && Array.isArray(state.settings.officeOrder))
+    ? state.settings.officeOrder.filter(o => OFFICES.indexOf(o) >= 0) : [];
+  OFFICES.forEach(o => { if (ord.indexOf(o) < 0) ord.push(o); });
+  return ord;
+}
+function officeOrder(o) { const i = officeOrderList().indexOf(o); return i < 0 ? OFFICES.length : i; }
 function anyOfficeAssigned() { return state.workers.some(w => OFFICES.indexOf(w.office) >= 0); }
 // 表示中フィルタ（事務所が一つも割り当てられていない間は無効＝全体）
 function effectiveOffice() { return anyOfficeAssigned() ? viewOffice : ''; }
 function workerMatchesOffice(id) { const flt = effectiveOffice(); return !flt || workerOffice(id) === flt; }
 // idリストを事務所ごとにグループ化（空グループは除外、本→旧→未分類の順）
 function groupIdsByOffice(ids) {
-  return OFFICES.concat(['']).map(function (o) {
+  return officeOrderList().concat(['']).map(function (o) {
     return { office: o, label: officeLabel(o), ids: ids.filter(id => workerOffice(id) === o) };
   }).filter(g => g.ids.length);
 }
 // [全体][本事務所][旧事務所] の絞り込みバー。未割当の間は空文字（非表示）
 function officeFilterBarHtml() {
   if (!anyOfficeAssigned()) return '';
-  const opts = [['', '全体']].concat(OFFICES.map(o => [o, o]));
+  const opts = [['', '全体']].concat(officeOrderList().map(o => [o, o]));
   return '<div class="office-filter">' + opts.map(function (o) {
     const active = (viewOffice === o[0]) ? ' active' : '';
     return '<button type="button" class="seg' + active + '" onclick="setViewOffice(\'' + o[0] + '\')">' + esc(o[1]) + '</button>';
@@ -835,6 +860,29 @@ function setViewOffice(o) {
   viewOffice = (o === '本事務所' || o === '旧事務所') ? o : '';
   if (currentView === 'today') renderToday();
   if (currentView === 'month') renderMonth();
+}
+function renderOfficeOrderUI() {
+  const el = document.getElementById('office-order-list');
+  if (!el) return;
+  const list = officeOrderList();
+  el.innerHTML = list.map(function (o, i) {
+    return '<div class="ord-row">' +
+      '<span class="ord-name">' + (i + 1) + '. ' + esc(o) + '</span>' +
+      '<span class="ord-btns">' +
+        '<button class="btn-sm" onclick="moveOffice(' + i + ',-1)"' + (i === 0 ? ' disabled' : '') + '>▲ 上へ</button>' +
+        '<button class="btn-sm" onclick="moveOffice(' + i + ',1)"' + (i === list.length - 1 ? ' disabled' : '') + '>▼ 下へ</button>' +
+      '</span></div>';
+  }).join('');
+}
+function moveOffice(i, dir) {
+  const list = officeOrderList();
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  const t = list[i]; list[i] = list[j]; list[j] = t;
+  state.settings.officeOrder = list;
+  saveState();
+  renderOfficeOrderUI();
+  renderAll();
 }
 
 /* ========== 画面切替 ========== */
@@ -1064,7 +1112,7 @@ function renderRoster() {
            '<div class="r-stat">' + stat + '</div></div>';
   }
   if (anyOfficeAssigned()) {
-    el.innerHTML = OFFICES.concat(['']).map(function (o) {
+    el.innerHTML = officeOrderList().concat(['']).map(function (o) {
       const gw = ws.filter(w => (w.office || '') === o);
       if (!gw.length) return '';
       return '<div class="roster-group"><div class="office-head">' + esc(officeLabel(o)) +
@@ -1288,7 +1336,7 @@ function renderWorkers() {
     el.innerHTML = state.workers.map(workerCardHtml).join('');
     return;
   }
-  el.innerHTML = OFFICES.concat(['']).map(function (o) {
+  el.innerHTML = officeOrderList().concat(['']).map(function (o) {
     const gw = state.workers.filter(w => (w.office || '') === o);
     if (!gw.length) return '';
     return '<div class="wk-group-head">' + esc(officeLabel(o)) + '<span class="cnt">' + gw.length + '名</span></div>' +
@@ -1505,6 +1553,7 @@ function renderSettings() {
   document.getElementById('set-company').value = state.settings.companyName || '';
   document.getElementById('dbx-file-path').value = dbxFilePath;
   document.getElementById('dbx-redirect-display').textContent = window.location.origin + window.location.pathname;
+  renderOfficeOrderUI();
   updateDbxUI();
 }
 function saveWorkSettings() {
