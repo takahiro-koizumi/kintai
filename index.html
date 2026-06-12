@@ -527,6 +527,14 @@
       </select>
     </div>
     <div class="field">
+      <label>残業（空欄なら自動計算）</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="rec-ot" placeholder="自動" inputmode="numeric" oninput="updateRecCalc()" style="flex:1">
+        <button type="button" class="btn-sm" onclick="document.getElementById('rec-ot').value='';updateRecCalc()">自動に戻す</button>
+      </div>
+      <div style="font-size:11.5px;color:#94a3b8;margin-top:4px">「2:00」または「2.5」(時間)で入力。空欄なら出退勤から自動計算します。</div>
+    </div>
+    <div class="field">
       <label>備考</label>
       <input type="text" id="rec-note" placeholder="任意">
     </div>
@@ -698,6 +706,7 @@ function normalizeState(d) {
       in: r.in || '', out: r.out || '', breakMin: Number(r.breakMin) || 0, note: r.note || ''
     };
     if (r.holiday === 'yes' || r.holiday === 'no') o.holiday = r.holiday;
+    if (typeof r.otMin === 'number' && isFinite(r.otMin) && r.otMin >= 0) o.otMin = Math.round(r.otMin);
     return o;
   });
   return s;
@@ -808,6 +817,8 @@ function recOvertimeMin(r) {
   const wk = recWorkMin(r);
   if (wk == null) return null;
   if (recIsHoliday(r)) return 0;
+  // 残業の手入力（otMin）があれば自動計算より優先
+  if (typeof r.otMin === 'number' && r.otMin >= 0) return r.otMin;
   const inMin = hmToMin(r.in), outMin = hmToMin(r.out);
   if (inMin == null || outMin == null) return null;
   const ws = hmToMin(state.settings.workStart);
@@ -824,6 +835,15 @@ function recOvertimeMin(r) {
 }
 function recHolidayMin(r) {
   return recIsHoliday(r) ? (recWorkMin(r) || 0) : 0;
+}
+// 残業の手入力をパース。空欄→null（自動）、"2:00"/"2.5"/"2"→分、不正→NaN
+function parseOtInput(s) {
+  s = (s || '').trim();
+  if (!s) return null;
+  const m = /^(\d{1,2}):([0-5]?\d)$/.exec(s);
+  if (m) return (+m[1]) * 60 + (+m[2]);
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s) * 60);
+  return NaN;
 }
 
 /* ========== 事務所区分（本事務所 / 旧事務所 / 未分類） ========== */
@@ -1452,12 +1472,16 @@ function fillRecordModal(r) {
   document.getElementById('rec-out').value = r.out || '';
   document.getElementById('rec-break').value = (r.breakMin != null ? r.breakMin : state.settings.defaultBreakMin);
   document.getElementById('rec-holiday').value = r.holiday || '';
+  document.getElementById('rec-ot').value = (typeof r.otMin === 'number' && r.otMin >= 0) ? fmtHM(r.otMin) : '';
   document.getElementById('rec-note').value = r.note || '';
   updateRecCalc();
 }
 function updateRecCalc() {
   const dateEl = document.getElementById('rec-date');
   const holEl = document.getElementById('rec-holiday');
+  const otRaw = document.getElementById('rec-ot').value;
+  const otParsed = parseOtInput(otRaw);
+  const otManual = (typeof otParsed === 'number' && !Number.isNaN(otParsed));
   const tmp = {
     in: document.getElementById('rec-in').value,
     out: document.getElementById('rec-out').value,
@@ -1465,11 +1489,19 @@ function updateRecCalc() {
     date: dateEl ? dateEl.value : '',
     holiday: holEl && holEl.value ? holEl.value : undefined
   };
-  const w = recWorkMin(tmp);
+  if (otManual) tmp.otMin = otParsed;
   const el = document.getElementById('rec-calc');
+  if (otRaw.trim() && Number.isNaN(otParsed)) {
+    el.textContent = '残業の入力形式が正しくありません（例: 2:00 または 2.5）';
+    return;
+  }
+  const w = recWorkMin(tmp);
   if (w == null) { el.textContent = '出勤・退勤の両方を入力すると実働を計算します'; return; }
   if (recIsHoliday(tmp)) {
-    el.textContent = '休日出勤　実働 ' + fmtHM(w);
+    el.textContent = '休日出勤　実働 ' + fmtHM(w) + '（休日は残業を計上しません）';
+  } else if (otManual) {
+    const auto = Object.assign({}, tmp); delete auto.otMin;
+    el.textContent = '実働 ' + fmtHM(w) + '　／　残業 ' + fmtHM(recOvertimeMin(tmp)) + '（手入力）　自動なら ' + fmtHM(recOvertimeMin(auto));
   } else {
     el.textContent = '実働 ' + fmtHM(w) + '　／　残業 ' + fmtHM(recOvertimeMin(tmp));
   }
@@ -1515,15 +1547,21 @@ function saveRecordModal() {
   const breakMin = Math.max(0, parseInt(document.getElementById('rec-break').value, 10) || 0);
   const note = document.getElementById('rec-note').value.trim();
   const holV = document.getElementById('rec-holiday').value;
+  const otRaw = document.getElementById('rec-ot').value;
+  const otParsed = parseOtInput(otRaw);
+  if (otRaw.trim() && Number.isNaN(otParsed)) { alert('残業の入力が正しくありません。「2:00」や「2.5」(時間)の形式で入力してください'); return; }
+  const otManual = (typeof otParsed === 'number' && !Number.isNaN(otParsed));
   if (editingRecordId) {
     const r = state.records.find(x => x.id === editingRecordId);
     if (r) {
       Object.assign(r, { workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note });
       if (holV === 'yes' || holV === 'no') r.holiday = holV; else delete r.holiday;
+      if (otManual) r.otMin = otParsed; else delete r.otMin;
     }
   } else {
     const nr = { id: uid('r'), workerId: workerId, date: date, in: inV, out: outV, breakMin: breakMin, note: note };
     if (holV === 'yes' || holV === 'no') nr.holiday = holV;
+    if (otManual) nr.otMin = otParsed;
     state.records.push(nr);
   }
   saveState();
