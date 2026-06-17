@@ -408,7 +408,7 @@
               <button class="btn-sm" onclick="saveDbxFilePath()">保存</button>
             </div>
             <div class="help">
-              既定: <code>/大田原工業　工事部/事務/勤怠管理/kintai.json</code><br>
+              既定: <code>/★大田原工業　工事部/事務/勤怠管理/kintai.json</code><br>
               リダイレクトURI: <code id="dbx-redirect-display"></code>
             </div>
           </details>
@@ -581,7 +581,7 @@
 const STORAGE_KEY = 'kintai_state';
 const QR_PREFIX = 'KNT1:';
 const DBX_APP_KEY = 'w0akss3w157oa53';
-const DBX_DEFAULT_FILE_PATH = '/大田原工業　工事部/事務/勤怠管理/kintai.json';
+const DBX_DEFAULT_FILE_PATH = '/★大田原工業　工事部/事務/勤怠管理/kintai.json';
 const WD = ['日','月','火','水','木','金','土'];
 const OFFICES = ['本事務所', '旧事務所']; // 事務所区分（固定2種）。未設定='' は「未分類」扱い
 
@@ -2059,9 +2059,9 @@ setInterval(tickClock, 1000);
   }
   localStorage.setItem('dbx_app_key', DBX_APP_KEY);
 
+  // 旧フォルダ名「大田原工業　工事部」配下の保存先は新フォルダ名「★大田原工業　工事部」の既定へ移行
   const savedPath = localStorage.getItem('kintai_dbx_file_path');
-  const LEGACY_DBX_PATHS = ['/大田原工業　工事部/☆施工中/★勤怠管理/kintai.json'];
-  if (!savedPath || LEGACY_DBX_PATHS.indexOf(savedPath) >= 0) {
+  if (!savedPath || savedPath.indexOf('/★大田原工業　工事部/') !== 0) {
     dbxFilePath = DBX_DEFAULT_FILE_PATH;
     localStorage.setItem('kintai_dbx_file_path', DBX_DEFAULT_FILE_PATH);
   } else {

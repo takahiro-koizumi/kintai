@@ -16,8 +16,8 @@
 
 ## Dropbox連携
 - App Key: `w0akss3w157oa53`（Full Dropbox型、genba-board/kouteihyoと共有）
-- 保存先パス: `/大田原工業　工事部/事務/勤怠管理/kintai.json`
-- 旧パス `☆施工中/★勤怠管理/` は `LEGACY_DBX_PATHS` で自動マイグレ済み
+- 保存先パス: `/★大田原工業　工事部/事務/勤怠管理/kintai.json`
+- 保存済みパスが `/★大田原工業　工事部/` で始まらなければ既定へ自動移行（旧フォルダ名・旧 `☆施工中/★勤怠管理/` パスを一括で吸収。旧 `LEGACY_DBX_PATHS` を置換）
 - localStorageキー（状態）: `kintai_state`
 - localStorageキー（保存パス）: `kintai_dbx_file_path`（genba-board/kouteihyoと同一github.ioオリジンを共有するため、必ず `kintai_` 接頭辞を維持すること）
 - tokenは3アプリ共有のため、配置ボード等で接続済みなら勤怠アプリも自動接続
@@ -42,7 +42,7 @@
 - 修正は `index.html` を直接編集（正本はGitHubフォルダ側）
 - 区切りごとに git commit（小さくコミット）
 - 動作確認は `start.bat` でローカル起動してから push、カメラ系は公開URLで実機確認
-- Dropboxバックアップ: `Dropbox/大田原工業　工事部/事務/勤怠管理/` に手動コピーで保管（正本ではない）
+- Dropboxバックアップ: `Dropbox/★大田原工業　工事部/事務/勤怠管理/` に手動コピーで保管（正本ではない）
 
 ## 関連アプリ
 - [genba-board](https://github.com/takahiro-koizumi/genba-board) ... 現場配置ボード。同じApp Key・同じgithub.ioオリジン
