@@ -551,6 +551,11 @@
 <div class="modal-bg" id="wm-modal">
   <div class="modal">
     <h2 id="wm-title">明細</h2>
+    <div class="date-nav">
+      <button onclick="shiftWmMonth(-1)">◀</button>
+      <span class="lbl" id="wm-month-label">--</span>
+      <button onclick="shiftWmMonth(1)">▶</button>
+    </div>
     <div id="wm-body"></div>
     <div class="modal-actions">
       <button class="btn-sm left" onclick="addRecordForWm()">＋勤怠を追加</button>
@@ -1292,10 +1297,19 @@ function openWorkerMonth(id) {
   renderWorkerMonth();
   showModal('wm-modal');
 }
+function shiftWmMonth(n) {
+  let y = viewMonth.y, m = viewMonth.m + n;
+  while (m < 1) { m += 12; y--; }
+  while (m > 12) { m -= 12; y++; }
+  viewMonth = { y: y, m: m };
+  renderWorkerMonth();
+  if (currentView === 'month') renderMonth();
+}
 function renderWorkerMonth() {
   const id = wmWorkerId;
-  document.getElementById('wm-title').textContent =
-    workerName(id) + '　' + viewMonth.y + '年' + viewMonth.m + '月分（' + monthRangeLabel(viewMonth.y, viewMonth.m) + '）';
+  document.getElementById('wm-title').textContent = workerName(id);
+  document.getElementById('wm-month-label').textContent =
+    viewMonth.y + '年' + viewMonth.m + '月分（' + monthRangeLabel(viewMonth.y, viewMonth.m) + '）';
   const rs = recordsInMonth(viewMonth.y, viewMonth.m).filter(r => r.workerId === id)
     .sort((a, b) => a.date.localeCompare(b.date) || (a.in || '').localeCompare(b.in || ''));
   const body = document.getElementById('wm-body');
@@ -1340,6 +1354,7 @@ function workerCardHtml(w) {
     '<div class="wk-name">' + esc(w.name) + (w.active ? '' : ' <span class="tag">無効</span>') + '</div>' +
     '<div class="wk-acts">' +
       officeSelectHtml(w) +
+      '<button class="btn-sm" onclick="openWorkerMonth(\'' + w.id + '\')">月一覧</button>' +
       '<button class="btn-sm" onclick="showWorkerQr(\'' + w.id + '\')">QR表示</button>' +
       '<button class="btn-sm" onclick="renameWorker(\'' + w.id + '\')">名前変更</button>' +
       '<button class="btn-sm" onclick="toggleWorkerActive(\'' + w.id + '\')">' + (w.active ? '無効化' : '有効化') + '</button>' +
